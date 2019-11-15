@@ -1,0 +1,90 @@
+---
+title: "listings_cleaning"
+output: html_document
+---
+
+```{r, message=FALSE}
+library(tidyverse)
+```
+
+```{r, message=FALSE}
+data <- read_csv("../data/listings_condensed.csv")
+```
+
+```{r}
+View(head(data,20))
+```
+
+```{r}
+data <- data %>%  
+  rename(neighbourhood = neighbourhood_cleansed, 
+         neighbourhood_group = neighbourhood_group_cleansed) 
+```
+
+
+```{r}
+# remove comma and dollar sign in price columns: "$1,000" to 1000
+convert_price <- function(x) as.numeric(gsub("\\$|,", "", x))
+
+data <- data %>% 
+  mutate_at(c("price", "weekly_price", "cleaning_fee"), convert_price) %>%
+  mutate_if(is.logical, as.numeric) %>% # convert True False to 1,0
+  mutate_at(c("neighbourhood", "neighbourhood_group", "property_type", 
+              "room_type", "bed_type", "cancellation_policy"), as.factor)
+
+```
+
+```{r}
+# convert hosted_since(date) to hosted_years(numeric)
+data <-data %>% 
+  mutate(hosted_years = round(as.double(difftime(Sys.Date(), host_since)) / 365, 1))
+```
+
+```{r}
+# Extreme values
+# accomodates 22, bath 14, bedroom 21, beds40
+filter_all(data[data$beds >20,], any_vars(!is.na(.)))
+```
+
+```{r}
+filter_all(data[data$bedrooms == 21,], any_vars(!is.na(.)))
+```
+
+
+```{r}
+#split strings in amenity
+string_split <- function(x) str_split(gsub("\\{|\\}|\"", "", x),",")
+data <- data %>% 
+  mutate_at("amenities", string_split)
+```
+
+```{r}
+# see some examples
+data$amenities[1]
+data$amenities[100]
+data$amenities[500]
+data$amenities[1000]
+data$amenities[5000]
+```
+
+Some important amenities: 
+Wifi, Air Conditioning, Kitchen, Heating, Shampoo.....
+
+Additional feature: number of amenities, number of essential amenities,...
+
+```{r}
+# bind feature: number of amenities
+data <- data %>% 
+  mutate(number_of_amenities = lengths(amenities))
+
+data$number_of_amenities[1:10]
+```
+
+```{r}
+# Add some categorical varibles, for example if it has elevator
+data <- data %>% 
+  mutate(have_elevator = lapply(amenities, function(x) as.numeric("Elevator" %in% x)))
+
+# apply to other essential amenities
+```
+
