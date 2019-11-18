@@ -73,7 +73,7 @@ Wifi, Air Conditioning, Kitchen, Heating, Shampoo.....
 Additional feature: number of amenities, number of essential amenities,...
 
 ```{r}
-# bind feature: number of amenities
+# bind new feature: number of amenities
 data <- data %>% 
   mutate(number_of_amenities = lengths(amenities))
 
@@ -81,10 +81,26 @@ data$number_of_amenities[1:10]
 ```
 
 ```{r}
-# Add some categorical varibles, for example if it has elevator
+# Add some categorical varibles, for example if it has elevator, kitchen, shampoo, Laptop friendly workspace
 data <- data %>% 
-  mutate(have_elevator = lapply(amenities, function(x) as.numeric("Elevator" %in% x)))
+  mutate(have_elevator = sapply(amenities, function(x) as.numeric("Elevator" %in% x))) %>% 
+  mutate(have_kitchen = sapply(amenities, function(x) as.numeric("Kitchen" %in% x))) %>% 
+  mutate(have_shampoo = sapply(amenities, function(x) as.numeric("Shampoo" %in% x))) %>%
+  mutate(have_laptop_workspace = sapply(amenities, function(x) as.numeric("Laptop friendly workspace" %in% x)))
+```
 
-# apply to other essential amenities
+```{r}
+#bind additional dataset: crime, hotel, income, etc....
+#neigherhood_data <- read.table("../data/neighbourhood.txt",sep = "\t")
+```
+
+
+```{r}
+data <- data %>% select(-amenities)
+```
+
+
+```{r}
+write_csv(data, "../data/data_cleaned.csv")
 ```
 
