@@ -1,0 +1,51 @@
+---
+title: "Some eda"
+output: html_document
+---
+
+```{r,message=FALSE}
+setwd("~/Desktop/airbnbhost/data")
+load("../data/listings_cleaning.RData")
+library(tidyverse)
+library(ggplot2)
+library(base)
+```
+
+```{r}
+#avg square feet for five boroughs
+data %>% group_by(neighbourhood_group) %>% summarise(avgsquarefeet = mean(square_feet,na.rm = T))
+
+rt = data %>% group_by(neighbourhood_group,room_type) %>% count()
+
+#avg hosted years for five boros
+#any relationship between hosted years and avg price
+data %>% group_by(neighbourhood_group) %>% summarise(avg_hosted_years = mean(hosted_years,na.rm = T),avg_price = mean(price)) %>% arrange(desc(avg_price))
+
+
+#bar plot of number of room types for each boro
+ggplot(rt, aes(fill=room_type, y=n, x=neighbourhood_group)) + 
+    geom_bar(position="stack", stat="identity")+
+  labs(y = "number of rooms",x = "") +
+  theme(axis.text.x = element_text( size = 7)) +
+  theme(axis.title.y = element_text(size = 7))
+
+
+
+
+```
+
+```{r}
+#see whether the cancellation policy is strict or moderate
+data = data %>%
+  mutate(cancelpolicy = strsplit(as.character(data$cancellation_policy),"_"))
+
+how_is_cancellation = function(x){
+  ifelse("strict" %in% x,"strict",ifelse("moderate" %in% x,"moderate","flexible"))
+}
+
+#for example, see how is the cancellation polict of the first 7 host
+#unlist(lapply(data$cancelpolicy,how_is_cancellation)[1:7])
+name = data$name[1:7]
+cancel = unlist(lapply(data$cancelpolicy,how_is_cancellation)[1:7])
+as.data.frame(cbind(name,cancel))
+```
