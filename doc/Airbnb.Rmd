@@ -1,0 +1,156 @@
+---
+title: "Airbnb"
+author: "Chengyue MENG cm3769"
+date: "11/11/2019"
+output: pdf_document
+---
+
+
+```{r library}
+library(data.table)
+library(dplyr)
+library(ggplot2)
+library(scales)
+library(tibble)
+```
+
+```{r function}
+price_convert <- function(x){
+  x <- substr(x, 2, length(x)-4)
+  x <- as.numeric(x)
+  x
+}
+
+length_remove <- function(word_list){
+  return(word_list[nchar(word_list) > 2])
+}
+
+length_remove2 <- function(x){
+  y <- unlist(strsplit(x, split = " "))
+  n <- nchar(y)
+  y <- y[n > 3]
+  return(y)
+}
+
+```
+
+
+
+```{r columns}
+dat <- read.csv("listings.csv", header=T)
+#names(dat)
+dat2 <- data.table(dat)
+
+dat2 <- dat2 %>% select(id,name, description, transit, house_rules, host_since, host_is_superhost, host_listings_count, host_identity_verified, neighbourhood_cleansed, 
+neighbourhood_group_cleansed, zipcode, latitude, longitude, property_type, room_type, accommodates, bathrooms, bedrooms, beds,bed_type, amenities, square_feet, price, weekly_price, cleaning_fee, minimum_nights, availability_365, number_of_reviews, instant_bookable, cancellation_policy, require_guest_phone_verification)
+
+write.csv(dat2, "listings_v2.csv")
+```
+
+
+
+```{r data cleaning}
+price_cols <- names(dat2)[24:26]
+dat2[,24:26] <- dat2[, lapply(X = .SD, FUN = "price_convert"), .SDcols = price_cols] #as.numeric(price)
+```
+
+
+
+
+##EDA    
+
+```{r EDA}
+
+#Distribution of Price
+qplot(dat2$price, main = "Histogram of price", xlab = "Price")
+
+# % of 5 boroughs
+neighb_count <- dat2[, .N, keyby = neighbourhood_group_cleansed] %>% 
+                mutate(percent = percent(N / sum(N))) %>% 
+                mutate(label = paste(neighbourhood_group_cleansed, percent))
+pie(neighb_count$N, neighb_count$label)
+
+# by neighbourhood
+dat2[,.N,keyby = neighbourhood_cleansed]
+
+dat_m <- dat2[neighbourhood_group_cleansed %in% c("Manhattan", "Brooklyn")]
+m_count <- dat_m[,.N,keyby = neighbourhood_cleansed]
+setorderv(m_count,"N",order = -1)
+m_count
+barplot(m_count$N[1:5], names.arg = m_count$neighbourhood_cleansed[1:5],cex.names = 0.9)
+
+
+# average price in 5 boroughs
+price_avg <- dat2 %>% group_by(neighbourhood_group_cleansed) %>% 
+                 summarise(Avg_price = round(mean(price, na.rm = T),2), N = n())
+setorderv(price_avg, "Avg_price",order = -1)
+price_avg
+
+barplot(price_avg$Avg_price, names.arg = price_avg$neighbourhood_group_cleansed, ylim = c(0,200))
+text(x = c(0.7,1.9,3.1,4.2,5.5), y = price_avg$Avg_price + 6, labels = paste("$", price_avg$Avg_price))
+
+# average price by room type  
+
+price_type <- dat2 %>% group_by(room_type) %>% summarise(avg_price = round(mean(price, na.rm = T),2))
+price_type
+
+barplot(height = price_type$avg_price, names.arg = price_type$room_type)
+
+price_type <- dat2 %>% group_by(neighbourhood_group_cleansed, room_type) %>% summarise(n=n())
+setorderv(price_type, cols = "n", order = -1)
+ggplot(price_type, aes(fill=room_type, y=n, x=neighbourhood_group_cleansed)) +
+        geom_bar(position="stack", stat="identity")+
+        xlab("Neighbourhood") + ylab("Counts")
+```
+
+
+```{r}
+library(tm)
+library(stringr)
+library(superml)
+library(wordcloud)
+library(purrr)
+library(wordcloud2)
+# desc <- tolower(dat2$description)
+name <- tolower(dat2$name)
+
+#remove stopwords  
+stopwords_regex <- paste(stopwords('en'), collapse = '\\b|\\b')
+stopwords_regex <- paste0('\\b', stopwords_regex, '\\b')
+name_clean <- str_replace_all(string = name, pattern = stopwords_regex," ") 
+# remove numbers/special characters
+name_clean <- str_replace_all(name_clean, pattern = "[[:punct:]]", " ")
+name_clean <- str_replace_all(name_clean, pattern = "[0-9]", " ")
+name_clean <- str_replace_all(name_clean, pattern = "[@#$%&*()-+=.~☆]", " ")
+# remove non-English words
+name_clean <- gsub(pattern = "[^a-z]", replacement = " ", x = name_clean)
+name_clean <- lapply(name_clean, length_remove2)
+name_clean2 <- unlist(map(name_clean, paste, collapse = ' '))
+
+name_stem <- tokenize_word_stems(name_clean2, language = "english")
+name_stem <- unlist(map(name_stem, paste, collapse = ' '))
+
+tf <- TfIdfVectorizer$new(smooth_idf = TRUE, min_df = 1)
+tf_features <- tf$fit_transform(name_clean2)
+
+
+cp <- Corpus(VectorSource(name_stem)) # stems as corpus
+
+# cp <- tm_map(cp, removePunctuation)
+# cp <- tm_map(cp, stripWhitespace)
+# cp <- tm_map(cp, removeWords, stopwords("english"))
+
+dtm <- as.matrix(DocumentTermMatrix(cp))
+freq <- colSums(dtm) %>% sort(decreasing = T) %>% as.data.frame() %>% rownames_to_column("word")
+colnames(freq)[2] <- "freq"
+wordcloud2(freq) 
+
+wordcloud2(freq, figPath = "~/Documents/2019 Fall/5291 ADA/Project/logoblack.png",color = "skyblue",backgroundColor="black")
+```
+
+
+
+
+
+
+
