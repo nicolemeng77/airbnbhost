@@ -1,0 +1,81 @@
+---
+title: "Untitled"
+output: html_document
+---
+
+```{r,message=FALSE}
+setwd("~/Desktop/airbnbhost/data")
+load("../data/listings_cleaning.RData")
+library(tm)
+library(data.table)
+library(tidytext)
+library(tidyverse)
+library(DT)
+library(textdata)
+library(janeaustenr)
+library(stringr)
+library(dplyr)
+library(wordcloud)
+library(tidyr)
+library(RColorBrewer)
+library(gridExtra)
+```
+
+```{r}
+leadingWhitespace <- content_transformer(function(x) str_trim(x, side = "both"))
+
+corpus <- VCorpus(VectorSource(data$description))%>%
+  tm_map(content_transformer(tolower))%>%
+  tm_map(removePunctuation)%>%
+  tm_map(removeNumbers)%>%
+  tm_map(removeWords, character(0))%>%
+  tm_map(stripWhitespace)
+
+corpus = tm_map(corpus, content_transformer(function(s){
+  gsub(pattern = '[^a-zA-Z0-9\\s]+',
+       x = s,
+       replacement = " ",
+       ignore.case = TRUE,
+       perl = TRUE)
+}))
+
+
+stemmed <- tm_map(corpus, stemDocument) %>%
+  tidy() %>%
+  select(text) 
+
+dict <- tidy(corpus) %>%
+  select(text) %>%
+  unnest_tokens(dictionary, text)
+```
+
+```{r}
+data("stop_words")
+
+completed <- stemmed %>%
+  mutate(id = row_number()) %>%
+  unnest_tokens(stems, text) %>%
+  bind_cols(dict) %>%
+  anti_join(stop_words, by = c("dictionary" = "word"))
+ 
+completed <- completed %>%
+  group_by(stems) %>%
+  count(dictionary) %>%
+  mutate(word = dictionary[which.max(n)]) %>%
+  ungroup() %>%
+  select(stems, word) %>%
+  distinct() %>%
+  right_join(completed) %>%
+  select(-stems)
+
+completed <- completed %>%
+  group_by(id) %>%
+  summarise(stemmedwords= str_c(word, collapse = " ")) %>%
+  ungroup()
+
+data <- data %>%
+  mutate(id = row_number()) %>%
+  inner_join(completed)
+
+save(data,file = "../data/processed_listings.RData")
+```
