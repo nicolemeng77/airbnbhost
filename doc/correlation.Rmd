@@ -1,0 +1,140 @@
+---
+title: "correlation"
+output: pdf_document
+---
+
+```{r, message=FALSE}
+library(tidyverse)
+library(reshape2)
+library(vcd)
+```
+
+```{r, message = FALSE}
+data <- read_csv("../data/data_cleaned.csv")
+```
+
+### Correlation Heatmap of numeric variables ###
+
+```{r}
+numeric_data <- data %>% 
+  select(host_is_superhost, host_listings_count, host_identity_verified, 
+         accommodates, bathrooms, bedrooms, beds, 
+         minimum_nights, availability_365, instant_bookable,
+         require_guest_phone_verification, number_of_reviews, 
+         hosted_years, number_of_amenities, have_elevator,
+         have_kitchen, have_shampoo, have_laptop_workspace) 
+
+##############
+#### TODO ####
+##############
+#remove NA values for now, need to fill NA values if possible 
+#can do it in pre-processing part and reuse it here
+num_cormat <- round(cor(na.omit(numeric_data)),2)
+head(num_cormat[,1:3])
+```
+
+
+```{r}
+# reorder correlation matrix
+reorder_cormat <- function(cormat){
+dd <- as.dist((1-cormat)/2) # Use correlation between variables as distance
+hc <- hclust(dd)
+cormat <-cormat[hc$order, hc$order]
+}
+
+# get upper upper triangle of the correlation matrix
+get_upper_tri <- function(cormat){
+  cormat[lower.tri(cormat)]<- NA
+  return(cormat)
+}
+
+num_cormat <- reorder_cormat(num_cormat)
+upper_tri <- get_upper_tri(num_cormat)
+
+# Melt the correlation matrix
+melted_cormat <- melt(upper_tri, na.rm = TRUE)
+
+# Create a ggheatmap
+ggplot(melted_cormat, aes(Var2, Var1, fill = value))+
+  geom_tile(color = "white")+
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white", 
+                       midpoint = 0, limit = c(-1,1), space = "Lab", 
+                       name="Pearson\nCorrelation") +
+  geom_text(aes(Var2, Var1, label = value), color = "black", size = 1.5)+
+  labs(title= "Correlation Heatmap (Numerical Variables)")+
+  theme_minimal()+ 
+  theme(axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        panel.grid.major = element_blank(),
+        axis.ticks = element_blank(),
+        axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1),
+        plot.title = element_text(hjust = 0.5, vjust = 3))+
+ coord_fixed()
+
+```
+
+High degree of correlation between accomodates, bedrooms and beds. 
+Consider only keep one of them, accomodates.
+
+Moderate degree of correlation spotted among 4 groups:
+1. number of amenities, have_laptop_workspace, have_shampoo;
+2. bathroom, bedrooms, beds, accomodates;
+3. host_identity_verified, hosted_years;
+4. host_is_superhost, number_of_reviews, number_of_amenities
+
+### Correlation Heatmap of categorical variables ###
+
+Use Cramer's V to measure strength of association between two nominal variables 
+instead of peason's correlation coefficient
+
+
+```{r}
+# wrapper function to output correlation matrix of categorical variables
+catcorrm <- function(vars, dat){
+  sapply(vars, function(y) sapply(vars, function(x) 
+    vcd::assocstats(table(dat %>% pull(x), dat %>% pull(y)))$cramer))
+}
+```
+
+
+```{r}
+cate_var <- c("neighbourhood", "neighbourhood_group", "property_type", "room_type",
+              "bed_type", "cancellation_policy")
+cat_cormat <- round(catcorrm(cate_var, data),2)
+cat_cormat
+```
+
+```{r}
+cat_cormat <- reorder_cormat(cat_cormat)
+upper_tri_cat <- get_upper_tri(cat_cormat)
+
+melted_cormat_cat <- melt(upper_tri_cat, na.rm = TRUE)
+
+ggplot(melted_cormat_cat, aes(Var2, Var1, fill = value))+
+  geom_tile(color = "white")+
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white", 
+                       midpoint = 0, limit = c(-1,1), space = "Lab", 
+                       name="Cramer's V") +
+  geom_text(aes(Var2, Var1, label = value), color = "black", size = 4)+
+  labs(title= "Correlation Heatmap (Categorical Variables)")+
+  theme_minimal()+ 
+  theme(axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        panel.grid.major = element_blank(),
+        axis.ticks = element_blank(),
+        axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1),
+        plot.title = element_text(hjust = 0.8, vjust = 3))+
+ coord_fixed()
+```
+
+neighbourhood and neighbourhood_group has perfect correlaion as expected.
+(Keep neighbourhood_group for now in case bind additional features, remove from modeling)
+
+moderate degree of correlation between property_type abd room_type. 
+property_type also has some correlation,though low, with neighhourhood.
+May consider remove property_type.
+
+
+
+
+
