@@ -1,0 +1,298 @@
+---
+title: "eda2"
+author: "Hongye Jiang"
+date: "11/19/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+load("../data/orig_data.RData")
+library(tidyverse)
+library(MASS)
+```
+
+
+```{r}
+#ignore useless variables
+
+data <- orig_data %>% select(id,name,description, transit, house_rules, host_since, host_is_superhost, 
+                             host_listings_count, host_identity_verified, neighbourhood_cleansed,
+                             neighbourhood_group_cleansed, zipcode, latitude, longitude, property_type, 
+                             room_type, accommodates, bathrooms, bedrooms, beds,bed_type, amenities, 
+                             square_feet, price, weekly_price, cleaning_fee, minimum_nights, availability_365,
+                             number_of_reviews, instant_bookable, cancellation_policy, 
+                             require_guest_phone_verification)
+```
+
+
+```{r}
+nrow(data)
+colnames(data)
+```
+
+##############
+###part 1#####
+##############
+
+```{r}
+#rename variable
+
+data <- data %>% 
+  rename(neighbourhood = neighbourhood_cleansed, 
+         neighbourhood_group = neighbourhood_group_cleansed) 
+```
+
+
+```{r}
+#data structure
+
+data <- data %>% 
+  mutate_if(is.logical, as.numeric) %>% # convert True False to 1,0
+  mutate_at(c("neighbourhood", "neighbourhood_group", "property_type", 
+              "room_type", "bed_type", "cancellation_policy", 'host_is_superhost', 
+              'host_identity_verified', 'instant_bookable', 'require_guest_phone_verification'), 
+            as.factor)
+```
+
+
+```{r}
+#edit data value
+
+convert_price <- function(x) as.numeric(gsub("\\$|,", "", x))
+string_split <- function(x) str_split(gsub("\\{|\\}|\"", "", x),",")
+
+data <- data %>%
+  mutate_at(c("price", "weekly_price", "cleaning_fee"), convert_price) %>%
+  mutate_at("amenities", string_split) %>%
+  mutate(hosted_years = round(as.double(difftime(Sys.Date(), host_since)) / 365, 1))
+
+data <- data %>% 
+  mutate(number_of_amenities = lengths(amenities))
+
+# # Add some categorical varibles, for example if it has elevator, kitchen, shampoo, Laptop friendly workspace
+# data <- data %>% 
+#   mutate(have_elevator = sapply(amenities, function(x) as.numeric("Elevator" %in% x))) %>% 
+#   mutate(have_kitchen = sapply(amenities, function(x) as.numeric("Kitchen" %in% x))) %>% 
+#   mutate(have_shampoo = sapply(amenities, function(x) as.numeric("Shampoo" %in% x))) %>%
+#   mutate(have_laptop_workspace = sapply(amenities, function(x) as.numeric("Laptop friendly workspace" %in% x)))
+```
+
+Some important amenities: 
+Wifi, Air Conditioning, Kitchen, Heating, Shampoo.....
+
+Additional feature: number of amenities, number of essential amenities,...
+
+MAY ADD MORE!
+
+
+```{r}
+# Outliers 
+
+# need to check: accommodates, bathrooms, bedrooms, beds, price, cleaning_fee, minimum_nights, number_of_reviews...
+# ATTENTION many 0 bedroom! 
+
+nrow(data)  #48377
+
+# nrow(data %>% filter(beds > 20)) #5
+# nrow(data %>% filter(bedrooms > 20)) #1
+# nrow(data %>% filter(bedrooms == 1 & bathrooms > 4)) #39    ##1 bedroom & 3+ bathrooms usually comes with price under 100
+# nrow(data %>% filter(price > 1500)) #137
+# nrow(data %>% filter(cleaning_fee > 200 & minimum_nights < 30)) #381   ##prefer not to use cleaning_fee
+# nrow(data %>% filter(minimum_nights > 90)) #361
+# hist(data$number_of_reviews)
+# hist(data$hosted_years)
+
+data <- data  %>% 
+  filter(beds <= 20, bedrooms <= 20,
+         bedrooms != 1 | bathrooms <= 4, 
+         price < 1500 & price > 0,
+         cleaning_fee <= 200 | minimum_nights >= 30,
+         minimum_nights <= 90)
+
+nrow(data)  #38207
+```
+
+
+```{r}
+#check missing value
+
+colSums(is.na(data))
+
+# data <- data %>%
+#   select(-c(weekly_price, square_feet))
+```
+delete weekly_price, square_feet
+
+
+##############
+###part 2#####
+##############
+
+
+```{r}
+#linear regression
+
+fit1 <- lm(price ~ host_is_superhost + bathrooms + bedrooms + beds + number_of_reviews + instant_bookable + require_guest_phone_verification + hosted_years + number_of_amenities, data)
+summary(fit1)
+#Adjusted R-squared:  0.2092
+#multicollinearity
+car::vif(fit1)
+
+
+data <- data %>% 
+  mutate(if_Manhattan = ifelse(data$neighbourhood_group == 'Manhattan', 1, 0)) %>%
+  mutate(if_Brooklyn = ifelse(data$neighbourhood_group == 'Brooklyn', 1, 0)) %>%
+  mutate(if_Queens = ifelse(data$neighbourhood_group == 'Queens', 1, 0)) %>%
+  mutate(if_Bronx = ifelse(data$neighbourhood_group == 'Bronx', 1, 0)) 
+fit2 <- lm(price ~ bathrooms + bedrooms + beds + number_of_reviews + 
+             hosted_years + number_of_amenities + if_Manhattan + if_Brooklyn + if_Queens + if_Bronx, data)
+summary(fit2)
+#Adjusted R-squared:  0.3295 
+car::vif(fit2)
+
+#robust regression?  ##no conclusion
+fit3 <- rlm(price ~ bathrooms + bedrooms + beds + number_of_reviews + 
+             hosted_years + number_of_amenities + if_Manhattan + if_Brooklyn + if_Queens + if_Bronx, data)
+summary(fit3)
+
+
+#other method...
+```
+
+
+
+```{r}
+###neighbourhood_group###
+
+# % of 5 boroughs
+dat2 <- data.table(data)
+neighb_count <- dat2[, .N, keyby = neighbourhood_group] %>%
+                mutate(percent = percent(N / sum(N))) %>% 
+                mutate(label = paste(neighbourhood_group, percent))
+pie(neighb_count$N, neighb_count$label)
+
+# average price in 5 boroughs
+price_avg <- dat2 %>% group_by(neighbourhood_group) %>% 
+                 summarise(Avg_price = round(mean(price, na.rm = T),2), N = n())
+setorderv(price_avg, "Avg_price",order = -1)
+price_avg
+
+#bar plot
+barplot(price_avg$Avg_price, names.arg = price_avg$neighbourhood_group, ylim = c(0,200))
+text(x = c(0.7,1.9,3.1,4.2,5.5), y = price_avg$Avg_price + 6, labels = paste("$", price_avg$Avg_price))
+
+#hist of price in 5 boroughs
+data %>% ggplot(aes(price, color = neighbourhood_group)) + geom_freqpoly()
+
+#boxplot
+data %>% ggplot(aes(fct_reorder(neighbourhood_group, -price), price, color = neighbourhood_group)) + geom_boxplot()
+
+#Wilcoxon rank-sum test
+kruskal.test(price ~ neighbourhood_group, data)
+#the price in at least one borough is different from others
+
+wilcox.test(data[data$neighbourhood_group == 'Manhattan',]$price, 
+            data[data$neighbourhood_group == 'Brooklyn',]$price)
+
+wilcox.test(data[data$neighbourhood_group == 'Brooklyn',]$price, 
+            data[data$neighbourhood_group == 'Staten Island',]$price)
+
+wilcox.test(data[data$neighbourhood_group == 'Staten Island',]$price, 
+            data[data$neighbourhood_group == 'Queens',]$price)
+#p-value = 0.3391, no significant difference in these two boroughs. 
+```
+
+
+```{r}
+###neighbourhood###
+
+dat_m <- dat2[neighbourhood_group %in% c("Manhattan", "Brooklyn")]
+m_count <- dat_m[,.N,keyby = neighbourhood]
+setorderv(m_count,"N",order = -1)
+m_count
+barplot(m_count$N[1:5], names.arg = m_count$neighbourhood[1:5],cex.names = 0.9)
+```
+
+
+```{r}
+###room_type###
+
+# average price by room type  
+price_type <- dat2 %>% group_by(room_type) %>% summarise(avg_price = round(mean(price, na.rm = T),2))
+price_type
+
+barplot(height = price_type$avg_price, names.arg = price_type$room_type)
+
+# average price by room type + boroughs
+price_type <- dat2 %>% group_by(neighbourhood_group, room_type) %>% summarise(n=n())
+setorderv(price_type, cols = "n", order = -1)
+ggplot(price_type, aes(fill=room_type, y=n, x=neighbourhood_group)) +
+        geom_bar(position="stack", stat="identity")+
+        xlab("Neighbourhood") + ylab("Counts")
+
+#Wilcoxon rank-sum test
+kruskal.test(price ~ room_type, data)
+```
+
+
+```{r}
+###hosted_years###
+
+#avg hosted years for five boros
+#any relationship between hosted years and avg price
+data %>% group_by(neighbourhood_group) %>% summarise(avg_hosted_years = mean(hosted_years,na.rm = T),avg_price = mean(price)) %>% arrange(desc(avg_price))
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Else
+```{r}
+###cancellation_policy###
+
+#see whether the cancellation policy is strict or moderate
+data = data %>%
+  mutate(cancelpolicy = strsplit(as.character(data$cancellation_policy),"_"))
+
+how_is_cancellation = function(x){
+  ifelse("strict" %in% x,"strict",ifelse("moderate" %in% x,"moderate","flexible"))
+}
+
+#for example, see how is the cancellation polict of the first 7 host
+#unlist(lapply(data$cancelpolicy,how_is_cancellation)[1:7])
+name = data$name[1:7]
+cancel = unlist(lapply(data$cancelpolicy,how_is_cancellation)[1:7])
+as.data.frame(cbind(name,cancel))
+```
+
+
+
+```{r}
+#Distribution of Price
+
+qplot(data$price, main = "Histogram of price", xlab = "Price")
+```
+
+
+
+
+
