@@ -234,6 +234,7 @@ ggplot(price_type, aes(fill=room_type, y=n, x=neighbourhood_group)) +
 
 #Wilcoxon rank-sum test
 kruskal.test(price ~ room_type, data)
+#p-value < 2.2e-16, significant differences in price according to room types
 ```
 
 
