@@ -25,7 +25,7 @@ data <- orig_data %>% select(id,name,description, transit, house_rules, host_sin
                              number_of_reviews, instant_bookable, cancellation_policy, 
                              require_guest_phone_verification)
 #or just read the condensed listings
-data = read.csv("listings_condensed.csv",header = T)                            
+#data = read.csv("listings_condensed.csv",header = T)                            
 ```
 
 
@@ -247,27 +247,6 @@ kruskal.test(price ~ room_type, data)
 #any relationship between hosted years and avg price
 data %>% group_by(neighbourhood_group) %>% summarise(avg_hosted_years = mean(hosted_years,na.rm = T),avg_price = mean(price)) %>% arrange(desc(avg_price))
 ```
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 Else
