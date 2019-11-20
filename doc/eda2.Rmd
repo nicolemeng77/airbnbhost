@@ -9,6 +9,8 @@ output: html_document
 load("../data/orig_data.RData")
 library(tidyverse)
 library(MASS)
+library(scales)
+library(data.table)
 ```
 
 
