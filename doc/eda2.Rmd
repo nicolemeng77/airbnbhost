@@ -303,7 +303,76 @@ as.data.frame(cbind(name,cancel))
 qplot(data$price, main = "Histogram of price", xlab = "Price")
 ```
 
+###############
+###some Test###
+###############
+```{r}
+#neighbourhood
 
+#assume same shape, only differ in location
+data %>% ggplot(aes(price, color = neighbourhood_group)) + geom_freqpoly()
+kruskal.test(price ~ neighbourhood_group, data)
+#with no surprise, the price in at least one borough is different from others
+wilcox.test(data[data$neighbourhood_group == 'Staten Island',]$price, data[data$neighbourhood_group == 'Queens',]$price)
+#p-value = 0.3391, no significant difference of prices in Staten Island and queens
+#two sample test
+t.test(data[data$neighbourhood_group == 'Staten Island',]$price,data[data$neighbourhood_group == 'Queens',]$price)
+#p-value = 0.9255, no significant difference of prices in Staten Island and queens
+
+
+#room_type in Manhattan
+#assume shape of dist same
+data[data$neighbourhood_group == "Manhattan",] %>% ggplot(aes(price, color = room_type)) + geom_freqpoly()
+kruskal.test(price~room_type, data = data[data$neighbourhood_group == "Manhattan",])
+#p-value < 2.2e-16, significant difference of prices among room type in Manhattan
+
+
+summary(aov(price~room_type,data[data$neighbourhood_group == "Manhattan",]))
+#p-value small, significant difference of prices among room type in Manhattan
+Box.test(aov(price~room_type,data[data$neighbourhood_group == "Manhattan",])$residuals)
+dwtest(aov(price~room_type,data[data$neighbourhood_group == "Manhattan",]))
+#error variance is not constant, errors are correlated remedial measures: Transformation, Cochrane-Orcutt Procedure
+
+
+#property_type in Manhattan
+man = data[data$neighbourhood_group == "Manhattan",]
+wilcox.test(man[man$property_type == 'Apartment',]$price, 
+           man[man$property_type == 'Others',]$price)
+#for example, there is no significant differences in prices between apartment and others in Manhattan.
+
+
+
+#linear regression
+avg_price_hostedyears = data %>% group_by(neighbourhood_group) %>% summarise(avg_hosted_years = mean(hosted_years,na.rm = T),avg_price = mean(price)) %>% arrange(desc(avg_price))
+f = lm(avg_price_hostedyears$avg_price~avg_price_hostedyears$avg_hosted_years)
+summary(f)
+#R square small not so significant relationship btw avg price and avg hosted years
+qqnorm(f$residuals)
+qqline(f$residuals)
+#the residuals are not normally distributed
+
+
+#predict price
+#select all numerial variables
+fit <- lm(price ~ host_is_superhost +host_identity_verified + accommodates+ bathrooms + bedrooms + beds +cleaning_fee+minimum_nights+availability_365+ number_of_reviews + instant_bookable + require_guest_phone_verification + hosted_years + number_of_amenities, data)
+summary(fit)
+sort(car::vif(fit),decreasing = TRUE)
+qqnorm(fit$residuals)
+#no multicollinearity > 10 variables
+#There is skewness, many points off the normal line. Thus the residuals are not normally distributed. Also the p-value of test is small so that we reject the null hypothesis (residuals are normally distributed)
+#remedial measures: transformation, robust regression methods
+library(lmtest)
+dwtest(fit)
+#p-value smaller than 0.05, so we reject the null hypothests. The errors are correlated. remedial measures: Transformation, Cochrane-Orcutt Procedure
+
+
+#model selection
+step(fit,direction = "both")
+#accommodates,bathrooms, bedrooms,beds,cleaning_fee,min_nights,number of reviews, number of amenities, hosted years and number of amenities
+summary(lm(price ~accommodates+ bathrooms + bedrooms + beds +cleaning_fee+minimum_nights+ number_of_reviews + number_of_amenities+hosted_years, man))
+# R square 0.4164 bigger than that of the model using all numerical variables.
+# Here using less vairables, model better
+```
 
 
 
