@@ -34,8 +34,8 @@ data <- orig_data %>% dplyr::select(id,name,description, transit, house_rules, h
 
 
 ```{r}
-nrow(data)
-colnames(data)
+# nrow(data)
+# colnames(data)
 ```
 
 ##############
@@ -51,8 +51,18 @@ data <- data %>%
 ```
 
 
+
 ```{r}
 #data structure
+data <- data %>%
+  mutate(host_is_superhost = ifelse(is.na(host_is_superhost), 0, host_is_superhost)) %>%
+  mutate(bathrooms = ifelse(is.na(bathrooms), 0, bathrooms)) %>%
+  mutate(bedrooms = ifelse(is.na(bedrooms), 0, bedrooms)) %>%
+  mutate(number_of_reviews = ifelse(is.na(number_of_reviews), 0, number_of_reviews)) %>%
+  mutate(host_response_time = ifelse(is.na(host_response_time), 'no_record', host_response_time)) %>%
+  mutate(cleaning_fee = ifelse(is.na(cleaning_fee), 0, cleaning_fee)) %>%
+  mutate(security_deposit = ifelse(is.na(security_deposit), 0, security_deposit))
+  
 
 data <- data %>% 
   mutate_if(is.logical, as.numeric) %>% # convert True False to 1,0
@@ -79,6 +89,7 @@ data <- data %>%
 data <- data %>% 
   mutate(number_of_amenities = lengths(amenities)) %>%
   mutate(number_of_verifications = lengths(host_verifications))
+
 
 #amenity
 
@@ -145,18 +156,17 @@ nrow(data)  #37989
 
 
 ```{r}
+#remove some NA
+data <- data %>% 
+  filter(!is.na(host_identity_verified) )
+```
+
+
+```{r}
 #check missing value
 
 colSums(is.na(data))
-
-# data <- data %>%
-#   select(-c(weekly_price, square_feet, security_deposit))
-
-data <- data[is.na(host_is_superhost), host_is_superhost := "0"]
-data <- data[!is.na(bathrooms) & !is.na(host_identity_verified) & !is.na(host_listings_count)]
-
 ```
-delete weekly_price, square_feet
 
 
 ##############
