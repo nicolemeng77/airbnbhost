@@ -14,17 +14,21 @@ library(data.table)
 ```
 
 
+
 ```{r}
 #ignore useless variables
 
-data <- orig_data %>% select(id,name,description, transit, house_rules, host_since, host_is_superhost, 
+data <- orig_data %>% dplyr::select(id,name,description, transit, house_rules, host_since, host_is_superhost, 
                              host_listings_count, host_identity_verified, neighbourhood_cleansed,
                              neighbourhood_group_cleansed, zipcode, latitude, longitude, property_type, 
                              room_type, accommodates, bathrooms, bedrooms, beds,bed_type, amenities, 
                              square_feet, price, weekly_price, cleaning_fee, minimum_nights, availability_365,
                              number_of_reviews, instant_bookable, cancellation_policy, 
-                             require_guest_phone_verification)
-#or just read the condensed listings
+                             require_guest_phone_verification,
+                             host_response_time, host_verifications, security_deposit)
+#host_has_profile_pic,  host_identity_verified
+
+#or just read the condensed listings(with different filters)
 #data = read.csv("listings_condensed.csv",header = T)                            
 ```
 
@@ -54,7 +58,8 @@ data <- data %>%
   mutate_if(is.logical, as.numeric) %>% # convert True False to 1,0
   mutate_at(c("neighbourhood", "neighbourhood_group", "property_type", 
               "room_type", "bed_type", "cancellation_policy", 'host_is_superhost', 
-              'host_identity_verified', 'instant_bookable', 'require_guest_phone_verification'), 
+              'host_identity_verified', 'instant_bookable', 'require_guest_phone_verification',
+              'host_response_time'), 
             as.factor)
 ```
 
@@ -66,34 +71,53 @@ convert_price <- function(x) as.numeric(gsub("\\$|,", "", x))
 string_split <- function(x) str_split(gsub("\\{|\\}|\"", "", x),",")
 
 data <- data %>%
-  mutate_at(c("price", "weekly_price", "cleaning_fee"), convert_price) %>%
+  mutate_at(c("price", "weekly_price", "cleaning_fee", "security_deposit"), convert_price) %>%
   mutate_at("amenities", string_split) %>%
+  mutate_at('host_verifications', string_split) %>% 
   mutate(hosted_years = round(as.double(difftime(Sys.Date(), host_since)) / 365, 1))
 
 data <- data %>% 
-  mutate(number_of_amenities = lengths(amenities))
+  mutate(number_of_amenities = lengths(amenities)) %>%
+  mutate(number_of_verifications = lengths(host_verifications))
 
-# # Add some categorical varibles, for example if it has elevator, kitchen, shampoo, Laptop friendly workspace
-# data <- data %>% 
-#   mutate(have_elevator = sapply(amenities, function(x) as.numeric("Elevator" %in% x))) %>% 
-#   mutate(have_kitchen = sapply(amenities, function(x) as.numeric("Kitchen" %in% x))) %>% 
-#   mutate(have_shampoo = sapply(amenities, function(x) as.numeric("Shampoo" %in% x))) %>%
-#   mutate(have_laptop_workspace = sapply(amenities, function(x) as.numeric("Laptop friendly workspace" %in% x)))
+#amenity
+
+data <- data %>% 
+  mutate(amenities = tolower(amenities)) %>% 
+  mutate(house_rules = tolower(house_rules)) %>% 
+  mutate(name = tolower(name)) %>%
+  mutate(transit_level = as.numeric(is.na(transit))) %>%  #1:has description, 0:NA
+  mutate(rule_Pets = ifelse(grepl("no pets", data$house_rules), 0, 1)) %>%
+  mutate(have_pet = ifelse(grepl("cat", data$amenities) | 
+                                grepl("dog", data$amenities) | 
+                                grepl("pet", data$amenities), 1, 0)) %>%
+  mutate(have_shampoo = ifelse(grepl("shampoo", data$amenities), 1, 0)) %>%
+  mutate(have_gym = ifelse(grepl("gym", data$amenities), 1, 0)) %>%
+  mutate(have_washer = ifelse(grepl("washer", data$amenities), 1, 0)) %>%
+  mutate(have_kitchen = ifelse(grepl("kitchen", data$amenities), 1, 0)) %>%
+  mutate(have_parking = ifelse(grepl("parking", data$amenities), 1, 0)) %>% 
+  mutate(have_elevator = ifelse(grepl("elevator", data$amenities), 1, 0)) %>% 
+  mutate(have_laptop_workspac = ifelse(grepl("Laptop friendly workspace", data$amenities), 1, 0)) 
+  
+
+#property_type (combine factors)
+
+data <- data.table(data)
+data <- data[property_type %in% c("Barn", "Bed and breakfast", "Boat", "Bungalow","Bus","Cabin","Camper/RV","Casa particular (Cuba)", "Castle","Cave","Cottage","Dome house","Earth house","Farm stay","Houseboat","Island","Nature lodge","Other","Tent","Timeshare","Tiny house","Yurt"), property_type:= "Others"]
+data <- data[property_type %in% c("Townhouse", "House", "Guesthouse", "Resort","Villa","Tiny house"), property_type:= "House"]
+data <- data[property_type %in% c("Apartment","Condominium","Guest suite","Serviced apartment"), property_type:= "Apartment"]
+data <- data[property_type %in% c("Hostel","Hotel","Boutique hotel","Aparthotel"), property_type:= "Hotel"]
+data <- data[grepl("loft", data$name), property_type := "Loft"]
+
 ```
-
-Some important amenities: 
-Wifi, Air Conditioning, Kitchen, Heating, Shampoo.....
-
-Additional feature: number of amenities, number of essential amenities,...
-
-MAY ADD MORE!
 
 
 ```{r}
 # Outliers 
 
 # need to check: accommodates, bathrooms, bedrooms, beds, price, cleaning_fee, minimum_nights, number_of_reviews...
-# ATTENTION many 0 bedroom! 
+### ATTENTION many 0 bedroom! 
+### ATTENTION many outliers in security_deposit
 
 nrow(data)  #48377
 
@@ -111,9 +135,12 @@ data <- data  %>%
          bedrooms != 1 | bathrooms <= 4, 
          price < 1500 & price > 0,
          cleaning_fee <= 200 | minimum_nights >= 30,
-         minimum_nights <= 90)
+         minimum_nights <= 90) %>%
+  filter(property_type != "Others") #havn't decided
 
-nrow(data)  #38207
+
+
+nrow(data)  #37989
 ```
 
 
@@ -123,7 +150,7 @@ nrow(data)  #38207
 colSums(is.na(data))
 
 # data <- data %>%
-#   select(-c(weekly_price, square_feet))
+#   select(-c(weekly_price, square_feet, security_deposit))
 ```
 delete weekly_price, square_feet
 
