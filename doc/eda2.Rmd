@@ -330,8 +330,9 @@ kruskal.test(price~room_type, data = data[data$neighbourhood_group == "Manhattan
 summary(aov(price~room_type,data[data$neighbourhood_group == "Manhattan",]))
 #p-value small, significant difference of prices among room type in Manhattan
 Box.test(aov(price~room_type,data[data$neighbourhood_group == "Manhattan",])$residuals)
+#error variance is not constant
 dwtest(aov(price~room_type,data[data$neighbourhood_group == "Manhattan",]))
-#error variance is not constant, errors are correlated remedial measures: Transformation, Cochrane-Orcutt Procedure
+#errors are correlated,remedial measures: Transformation, Cochrane-Orcutt Procedure
 
 
 #property_type in Manhattan
@@ -359,7 +360,7 @@ summary(fit)
 sort(car::vif(fit),decreasing = TRUE)
 qqnorm(fit$residuals)
 #no multicollinearity > 10 variables
-#There is skewness, many points off the normal line. Thus the residuals are not normally distributed. Also the p-value of test is small so that we reject the null hypothesis (residuals are normally distributed)
+#There is skewness, many points off the normal line. Thus the residuals are not normally distributed.
 #remedial measures: transformation, robust regression methods
 library(lmtest)
 dwtest(fit)
