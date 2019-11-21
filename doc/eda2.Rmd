@@ -151,6 +151,10 @@ colSums(is.na(data))
 
 # data <- data %>%
 #   select(-c(weekly_price, square_feet, security_deposit))
+
+data <- data[is.na(host_is_superhost), host_is_superhost := "0"]
+data <- data[!is.na(bathrooms) & !is.na(host_identity_verified) & !is.na(host_listings_count)]
+
 ```
 delete weekly_price, square_feet
 
