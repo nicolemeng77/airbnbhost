@@ -227,11 +227,11 @@ kruskal.test(price ~ neighbourhood_group, data)
 #the price in at least one borough is different from others
 
 #wilcox.test(data[data$neighbourhood_group == 'Manhattan',]$price, 
-            data[data$neighbourhood_group == 'Brooklyn',]$price)
+         #   data[data$neighbourhood_group == 'Brooklyn',]$price)
 #wilcox.test(data[data$neighbourhood_group == 'Brooklyn',]$price, 
-            data[data$neighbourhood_group == 'Staten Island',]$price)
+         #   data[data$neighbourhood_group == 'Staten Island',]$price)
 #wilcox.test(data[data$neighbourhood_group == 'Staten Island',]$price, 
-            data[data$neighbourhood_group == 'Queens',]$price)
+         #   data[data$neighbourhood_group == 'Queens',]$price)
 #p-value = 0.3391, no significant difference in these two boroughs. 
 
 
