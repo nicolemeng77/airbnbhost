@@ -358,11 +358,9 @@ dwtest(aov(price~room_type,data[data$neighbourhood_group == "Manhattan",]))
 #errors are correlated,remedial measures: Transformation, Cochrane-Orcutt Procedure
 
 
-#property_type in Manhattan
-man = data[data$neighbourhood_group == "Manhattan",]
-wilcox.test(man[man$property_type == 'Apartment',]$price, 
-           man[man$property_type == 'Others',]$price)
-#for example, there is no significant differences in prices between apartment and others in Manhattan.
+#property_type
+pairwise.wilcox.test(data$price, data$property_type)
+#there is significant differences in prices among different property types
 
 
 
