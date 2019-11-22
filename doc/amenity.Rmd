@@ -1,0 +1,353 @@
+---
+title: "amenity"
+output: html_document
+---
+
+```{r, message=FALSE}
+load("../data/cleaned_data.RData")
+library(tidyverse)
+```
+
+### have shampoo
+
+#### check for normal assumption
+```{r}
+ggplot(data, aes(x = price, color = have_shampoo, fill = have_shampoo))+
+  geom_density(alpha = 0.5)+
+  theme_minimal()
+```
+
+
+### log transformation 
+```{r}
+data <- data %>% mutate(log_price = log(price))
+
+data %>%
+  ggplot(aes(x = log_price, color = have_shampoo, fill = have_shampoo))+
+  geom_density(alpha = 0.4)+
+  theme_minimal()
+```
+
+Approximately normal after log transformation.
+
+#### Box-plot
+```{r}
+data %>%
+  ggplot(aes(x = reorder(neighbourhood_group, -log_price), 
+             y = log_price, fill = have_shampoo))+
+  geom_boxplot(outlier.size = 0.5)+
+  xlab("")+
+  theme_minimal()
+```
+
+Log-price is higher when the listig offers shampoo than not for every neighbourhood group from the plot. 
+
+#### t test
+```{r}
+have_shampoo <- data %>% filter(have_shampoo == 1) %>% pull(log_price)
+not_shampoo <- data %>% filter(have_shampoo == 0) %>% pull(log_price)
+
+var.test(have_shampoo, not_shampoo)
+```
+Equal Variance
+
+```{r}
+t.test(have_shampoo, not_shampoo, var.equal = T, alternative = "greater")
+```
+
+p-value < 0.05. Listings have shampoo have higher price!
+
+#### Anova to test price difference of whether have shampoo in each neighbourhood group
+```{r}
+summary(aov(log_price ~ neighbourhood_group * have_shampoo, data = data))
+```
+
+p-value < 0.05. Listings have shampoo have higher price in each neighbourhood.
+
+
+### have parking
+
+#### check for normal assumption for log_price
+
+```{r}
+data %>%
+  ggplot(aes(x = log_price, color = have_parking, fill = have_parking))+
+  geom_density(alpha = 0.4)+
+  theme_minimal()
+```
+
+Approximately normal after log transformation.
+
+#### Box-plot
+```{r}
+data %>%
+  ggplot(aes(x = reorder(neighbourhood_group, -log_price), 
+             y = log_price, fill = have_parking))+
+  geom_boxplot(outlier.size = 0.5)+
+  xlab("")+
+  theme_minimal()
+```
+
+#### t test
+```{r}
+have_parking <- data %>% filter(have_parking == 1) %>% pull(log_price)
+not_parking <- data %>% filter(have_parking == 0) %>% pull(log_price)
+
+var.test(have_parking, not_parking)
+```
+Not Equal Variance!
+
+```{r}
+t.test(have_parking, not_parking, var.equal = F, alternative = "greater")
+```
+
+Not statistically significant! Listings with parking do not have higher price.
+
+### have kitchen
+
+#### check for normal assumption for log_price
+
+```{r}
+data %>%
+  ggplot(aes(x = log_price, color = have_kitchen, fill = have_kitchen))+
+  geom_density(alpha = 0.4)+
+  theme_minimal()
+```
+
+Approximately normal after log transformation.
+
+#### Box-plot
+```{r}
+data %>%
+  ggplot(aes(x = reorder(neighbourhood_group, -log_price), 
+             y = log_price, fill = have_kitchen))+
+  geom_boxplot(outlier.size = 0.5)+
+  xlab("")+
+  theme_minimal()
+```
+
+Log-price is higher for listigs with kitchen than the ones with no kitchen access for every neighbourhood group from the plot. 
+
+#### t test
+```{r}
+have_kitchen <- data %>% filter(have_kitchen == 1) %>% pull(log_price)
+not_kitchen <- data %>% filter(have_kitchen == 0) %>% pull(log_price)
+
+var.test(have_kitchen, not_kitchen)
+```
+Not Equal Variance!
+
+```{r}
+t.test(have_kitchen, not_kitchen, var.equal = F, alternative = "greater")
+```
+
+p-value < 0.05. Listings with kitchen have higher price!
+
+#### Anova to test price difference of whether have kitchen in each neighbourhood group
+```{r}
+summary(aov(log_price ~ neighbourhood_group * have_kitchen, data = data))
+```
+
+p-value < 0.05. Listings with kitchen have higher price in each neighbourhood.
+
+
+### have gym 
+
+#### check for normal assumption for log_price
+```{r}
+data %>%
+  ggplot(aes(x = log_price, color = have_gym, fill = have_gym))+
+  geom_density(alpha = 0.4)+
+  theme_minimal()
+```
+
+Approximately normal after log transformation.
+
+#### Box-plot
+```{r}
+data %>%
+  ggplot(aes(x = reorder(neighbourhood_group, -log_price), 
+             y = log_price, fill = have_gym))+
+  geom_boxplot(outlier.size = 0.5)+
+  xlab("")+
+  theme_minimal()
+```
+
+Log-price is higher for listigs with gym than the ones with no gym access for every neighbourhood group from the plot. 
+
+#### t test
+```{r}
+have_gym <- data %>% filter(have_gym == 1) %>% pull(log_price)
+not_gym <- data %>% filter(have_gym == 0) %>% pull(log_price)
+
+var.test(have_gym, not_gym)
+```
+Equal Variance!
+
+```{r}
+t.test(have_gym, not_gym, var.equal = T, alternative = "greater")
+```
+
+p-value < 0.05. Listings with gym have higher price!
+
+#### Anova to test price difference of whether have kitchen in each neighbourhood group
+```{r}
+summary(aov(log_price ~ neighbourhood_group * have_gym, data = data))
+```
+
+p-value < 0.05. Listings with gym have higher price in each neighbourhood.
+
+### have elevator
+
+#### check for normal assumption for log_price
+```{r}
+data %>%
+  ggplot(aes(x = log_price, color = have_elevator, fill = have_elevator))+
+  geom_density(alpha = 0.4)+
+  theme_minimal()
+```
+
+Approximately normal after log transformation.
+
+#### Box-plot
+```{r}
+data %>%
+  ggplot(aes(x = reorder(neighbourhood_group, -log_price), 
+             y = log_price, fill = have_elevator))+
+  geom_boxplot(outlier.size = 0.5)+
+  xlab("")+
+  theme_minimal()
+```
+
+Log-price is higher for listigs with elavator than the ones with no gym access for every neighbourhood group from the plot. 
+
+#### t test
+```{r}
+have_elevator <- data %>% filter(have_elevator == 1) %>% pull(log_price)
+not_elevator <- data %>% filter(have_elevator == 0) %>% pull(log_price)
+
+var.test(have_elevator, not_elevator)
+```
+Not Equal Variance!
+
+```{r}
+t.test(have_elevator, not_elevator, var.equal = F, alternative = "greater")
+```
+
+p-value < 0.05. Listings with elevator have higher price!
+
+#### Anova to test price difference of whether have kitchen in each neighbourhood group
+```{r}
+summary(aov(log_price ~ neighbourhood_group * have_elevator, data = data))
+```
+
+p-value < 0.05. Listings with gym have higher price in each neighbourhood.
+
+### have transit information
+
+#### check for normal assumption for log_price
+```{r}
+data %>%
+  ggplot(aes(x = log_price, color = transit_level, fill = transit_level))+
+  geom_density(alpha = 0.4)+
+  theme_minimal()
+```
+
+Approximately normal after log transformation.
+
+#### Box-plot
+```{r}
+data %>%
+  ggplot(aes(x = reorder(neighbourhood_group, -log_price), 
+             y = log_price, fill = transit_level))+
+  geom_boxplot(outlier.size = 0.5)+
+  xlab("")+
+  theme_minimal()
+```
+
+#### t test
+```{r}
+have_transit <- data %>% filter(transit_level == 1) %>% pull(log_price)
+not_transit <- data %>% filter(transit_level == 0) %>% pull(log_price)
+
+var.test(have_transit, not_transit)
+```
+Not Equal Variance!
+
+```{r}
+t.test(have_transit, not_transit, var.equal = F, alternative = "greater")
+```
+
+p-value < 0.05. Listings with transit information have higher price!
+
+#### Anova to test price difference of whether have transit information in each neighbourhood group
+```{r}
+summary(aov(log_price ~ neighbourhood_group * transit_level, data = data))
+```
+
+#### Have transit information in Brooklyn
+
+```{r}
+have_transit_bk <- data %>% 
+  filter(transit_level == 1 & neighbourhood_group == "Brooklyn") %>% 
+  pull(log_price)
+not_transit_bk <- data %>% 
+  filter(transit_level == 0 & neighbourhood_group == "Brooklyn") %>% 
+  pull(log_price)
+
+var.test(have_transit_bk, not_transit_bk)
+```
+
+Equal Variance
+
+```{r}
+t.test(have_transit_bk, not_transit_bk, var.equal = T, alternative = "greater")
+```
+
+In brooklyn, have transit information actually does not imply higher price.
+
+### Pet Policy: If 'no pet' is specified in house rules. 
+
+#### check for normal assumption for log_price
+```{r}
+data %>%
+  ggplot(aes(x = log_price, color = rule_pets, fill = rule_pets))+
+  geom_density(alpha = 0.4)+
+  theme_minimal()
+```
+
+Approximately normal after log transformation.
+
+#### Box-plot
+```{r}
+data %>%
+  ggplot(aes(x = reorder(neighbourhood_group, -log_price), 
+             y = log_price, fill = rule_pets))+
+  geom_boxplot(outlier.size = 0.5)+
+  xlab("")+
+  theme_minimal()
+```
+
+#### t test
+```{r}
+allow_pet <- data %>% filter(rule_pets == 1) %>% pull(log_price)
+not_pet <- data %>% filter(rule_pets == 0) %>% pull(log_price)
+
+var.test(allow_pet, not_pet)
+```
+Not Equal Variance!
+
+```{r}
+t.test(allow_pet, not_pet, var.equal = F, alternative = "less")
+```
+
+p-value < 0.05. Listings allow pet have significant lower price.
+
+#### Anova to test price difference of whether have transit information in each neighbourhood group
+```{r}
+summary(aov(log_price ~ neighbourhood_group * transit_level, data = data))
+```
+
+
+
+
