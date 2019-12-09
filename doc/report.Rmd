@@ -444,7 +444,7 @@ summary(lm(price ~accommodates+ bathrooms + bedrooms + beds +cleaning_fee+minimu
 
 ## Linear Regression
 
-Since the model output, price, is a continuous variable, the first baseline model we have chosen is linear regression 
+Since the model output, price, is a continuous variable, the first baseline model we have chosen is linear regression. We performed one-hot encoding on category variables. For example, neigbourhood_group variable, used to be a categorical variable with five levels, now expaned to five dummy variables if_Manhattan, if_Brooklym, etc.
 
 ```{r}
 random_list <- sample(nrow(data),round(nrow(data)*0.7))
@@ -505,6 +505,9 @@ fit_linear1 <- lm(formula = log(price) ~ host_is_superhost + host_listings_count
 
 ```
 
+Simple linear model achieved a test MSE of 48436.03 and R-square of 0.53. We discovered multicollinearity issues as Variance inflation factor for all vairables are larger than 1, with some of them over 10 indicating serious multicollinearity issue. Hence we performed feature selection using AIC statistics and removed three variables: 
+host_identity_verified, bathrooms, have_laptop_workspac. However, we only observed a slight drop in test MSE and we decided to try regularized linear regression.
+
 ## Regularized Linear Regression
 
 When number of features is large and suffer from collinearity issues, simple linear model tends to overfit and thus have high variance sample. Hence, we next conducted lasso regression as a means of regularization in order to perform feature selection, reduce variance and decrease our of sample error.
@@ -538,6 +541,21 @@ rsq <- 1 - sse / sst
 rsq #0.3549032
 ```
 
+The test MSE of lasso regression model dropped significantly from 48436.03 to 18118.49. The R-square for lasso is 0.35, which is lower than that of linear regression since linear regression suffers from overfitting.
+
+```{r}
+a <- as.numeric(coef(lasso_reg, s = "lambda.1se"))
+aa <- data.frame(rownames(coef(lasso_reg, s = "lambda.1se")), a)
+aa <- aa[-1,]
+colnames(aa) <- c('row', 'value')
+ggplot(aa, aes(value, reorder(row, value))) +
+  geom_point(show.legend = FALSE) +
+  ggtitle("Influential Variables of Lasso Regression") +
+  xlab("Coefficient") +
+  ylab(NULL)
+```
+
+From the variable importance plot above, the top 3 variables that are determinant in pricing under Lasso model is Bathroom, 
 
 ## Random Forest
 
