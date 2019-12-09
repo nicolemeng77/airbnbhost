@@ -198,7 +198,11 @@ plogprice <- ggplot(aes(log(price)), data = data) +labs(  title = "Histogram of 
 ggarrange(pprice,plogprice,
                     labels = c("2.A", "2.B"),
                     ncol = 2, nrow = 1)
+
 ```
+
+
+
 
 
 ```{r}
