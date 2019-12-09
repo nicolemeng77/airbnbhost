@@ -13,6 +13,7 @@ library(scales)
 library(data.table)
 library(rsample) 
 library(randomForest)
+library(glmnet)
 library(ranger) 
 library(gbm)
 library(xgboost)
@@ -33,26 +34,23 @@ New York City is one of the most attactive metropolitan city for tourism, thus h
 There are `r nrow(orig_data)` rows, each row presenting a listing and `r ncol(orig_data)` columns representing a possible factor. Briefly browsing the columns and we have done an initial selection of factors, removing columns such as host's name, host's location and same values shared among all hosts such as state and country information which is NY, USA for all.            
 
 
-```{r}
+```{r, include=FALSE}
 #ignore useless variables
 data <- orig_data %>% dplyr::select(id,name,description, transit, house_rules, host_since, host_is_superhost, 
                              host_listings_count, host_identity_verified, neighbourhood_cleansed, square_feet,
                              neighbourhood_group_cleansed, zipcode, latitude, longitude, property_type, 
-                             room_type, accommodates, bathrooms, bedrooms, beds,bed_type, amenities, price, weekly_price, cleaning_fee, minimum_nights, availability_365,
+                             room_type, accommodates, bathrooms, bedrooms, beds,bed_type, amenities, price,
+                             weekly_price, cleaning_fee, minimum_nights, availability_365,
                              number_of_reviews, instant_bookable, cancellation_policy, 
                              require_guest_phone_verification,
                              host_response_time, host_verifications, security_deposit)
-#host_has_profile_pic,  host_identity_verified
-#or just read the condensed listings(with different filters)
-#data = read.csv("listings_condensed.csv",header = T)                            
 ```
-
-
 
 
 ```{r}
 nrow(data)
-colnames(data)
+ncol(data)
+#colnames(data)
 ```
 
 Now we are left with `r ncol(data)` columns: `r colnames(data)`. The data contains numerical variables: number of bedrooms/bathrooms; categorial variables: neighbourhood, property types and text variables: name/description.          
@@ -69,37 +67,12 @@ data <- data %>%
 
 
 ```{r}
-#data structure
-data <- data %>% 
-  mutate_if(is.logical, as.numeric) %>% # convert True False to 1,0
-  mutate_at(c("neighbourhood", "neighbourhood_group", "property_type", 
-              "room_type", "bed_type", "cancellation_policy", 'host_is_superhost', 
-              'host_identity_verified', 'instant_bookable', 'require_guest_phone_verification',
-              'host_response_time'), 
-            as.factor)
-```
-
-
-
-
-```{r}
-#edit data value
-convert_price <- function(x) as.numeric(gsub("\\$|,", "", x))
-string_split <- function(x) str_split(gsub("\\{|\\}|\"", "", x),",")
-data <- data %>%
-  mutate_at(c("price", "weekly_price", "cleaning_fee", "security_deposit"), convert_price) %>%
-  mutate_at("amenities", string_split) %>%
-  mutate_at('host_verifications', string_split) %>% 
-  mutate(hosted_years = round(as.double(difftime(Sys.Date(), host_since)) / 365, 1))
+#add new var
 data <- data %>% 
   mutate(number_of_amenities = lengths(amenities)) %>%
-  mutate(number_of_verifications = lengths(host_verifications))
-#amenity
-data <- data %>% 
-  mutate(amenities = tolower(amenities)) %>% 
-  mutate(house_rules = tolower(house_rules)) %>% 
-  mutate(name = tolower(name)) %>%
+  mutate(number_of_verifications = lengths(host_verifications)) %>%
   mutate(transit_level = as.numeric(is.na(transit))) %>%  #1:has description, 0:NA
+    #amenity
   mutate(rule_Pets = ifelse(grepl("no pets", data$house_rules), 0, 1)) %>%
   mutate(have_pet = ifelse(grepl("cat", data$amenities) | 
                                 grepl("dog", data$amenities) | 
@@ -110,38 +83,65 @@ data <- data %>%
   mutate(have_kitchen = ifelse(grepl("kitchen", data$amenities), 1, 0)) %>%
   mutate(have_parking = ifelse(grepl("parking", data$amenities), 1, 0)) %>% 
   mutate(have_elevator = ifelse(grepl("elevator", data$amenities), 1, 0)) %>% 
-  mutate(have_laptop_workspac = ifelse(grepl("Laptop friendly workspace", data$amenities), 1, 0)) 
+  mutate(have_laptop_workspac = ifelse(grepl("Laptop friendly workspace", data$amenities), 1, 0)) %>%
+  mutate(hosted_years = round(as.double(difftime(Sys.Date(), host_since)) / 365, 1)) 
   
-#property_type (combine factors)
+#Data Structure
+convert_price <- function(x) as.numeric(gsub("\\$|,", "", x))
+string_split <- function(x) str_split(gsub("\\{|\\}|\"", "", x),",")
+
+#delete sign, to lower letter
+data <- data %>%
+  mutate_at(c("price", "weekly_price", "cleaning_fee", "security_deposit"), convert_price) %>%
+  mutate_at("amenities", string_split) %>%
+  mutate_at('host_verifications', string_split) %>% 
+  mutate(amenities = tolower(amenities)) %>% 
+  mutate(house_rules = tolower(house_rules)) %>% 
+  mutate(name = tolower(name)) 
+
+#change logical to numeric, as.factor
+data <- data %>% 
+  mutate_if(is.logical, as.numeric) %>% # convert True False to 1,0
+  mutate_at(c("neighbourhood", "neighbourhood_group", "property_type", 
+              "room_type", "bed_type", "cancellation_policy", 'host_is_superhost', 
+              'host_identity_verified', 'instant_bookable', 'require_guest_phone_verification',
+              'host_response_time'), 
+            as.factor)
+
+#fill NA (to 0 in most cases)
+data <- data %>%
+  mutate(host_is_superhost = ifelse(is.na(host_is_superhost), 0, host_is_superhost)) %>%
+  mutate(bathrooms = ifelse(is.na(bathrooms), 0, bathrooms)) %>%
+  mutate(bedrooms = ifelse(is.na(bedrooms), 0, bedrooms)) %>%
+  mutate(beds = ifelse(is.na(beds), 0, beds)) %>%
+  mutate(number_of_reviews = ifelse(is.na(number_of_reviews), 0, number_of_reviews)) %>%
+  mutate(host_response_time = ifelse(is.na(host_response_time), 'no_record', host_response_time)) %>%
+  mutate(cleaning_fee = ifelse(is.na(cleaning_fee), 0, cleaning_fee)) %>%
+  mutate(security_deposit = ifelse(is.na(security_deposit), 0, security_deposit)) %>%
+  mutate(host_listings_count = ifelse(is.na(host_listings_count), 0, host_listings_count)) %>%
+  mutate(host_identity_verified = ifelse(is.na(host_identity_verified), 0, host_identity_verified)) %>%
+  mutate(hosted_years = ifelse(is.na(hosted_years), 0, hosted_years)) 
+
+#combine property_type ( factors)
 data <- data.table(data)
 data <- data[property_type %in% c("Barn", "Bed and breakfast", "Boat", "Bungalow","Bus","Cabin","Camper/RV","Casa particular (Cuba)", "Castle","Cave","Cottage","Dome house","Earth house","Farm stay","Houseboat","Island","Nature lodge","Other","Tent","Timeshare","Tiny house","Yurt"), property_type:= "Others"]
 data <- data[property_type %in% c("Townhouse", "House", "Guesthouse", "Resort","Villa","Tiny house"), property_type:= "House"]
 data <- data[property_type %in% c("Apartment","Condominium","Guest suite","Serviced apartment"), property_type:= "Apartment"]
 data <- data[property_type %in% c("Hostel","Hotel","Boutique hotel","Aparthotel"), property_type:= "Hotel"]
 data <- data[grepl("loft", data$name), property_type := "Loft"]
-
-
 ```
+
+
 
 In terms of data cleaning, we have done some simple formatting such as removing dollar sign in the price column. The original data sets include over 30 property types and some of them are quite similar, so we have merged similar ones such as "Apartment" and "Serviced apartment" and reduced to only 5 major types.      
 
 In order to test whether a specific amenity such as shampoo, parking or kitchen will significantly change the price. We have created some new categorical variables that have values of 0s and 1s and named them with "have_shampoo" etc.       
 
 
-Also, for NLP, we have removed stopwords, punctuations and special characters from the "description" and "summary". We also have extracted their stems for further text analysis.                
+(Also, for NLP, we have removed stopwords, punctuations and special characters from the "description" and "summary". We also have extracted their stems for further text analysis.  )              
 
 
-
-```{r}
-# average price by room type + boroughs
-price_type <- data %>% group_by(neighbourhood_group, room_type) %>% summarise(n=n())
-setorderv(price_type, cols = "n", order = -1)
-ggplot(price_type, aes(fill=room_type, y=n, x=neighbourhood_group)) +
-        geom_bar(position="stack", stat="identity")+
-        xlab("Neighbourhood") + ylab("# of Listings")
-```
-
-
+Looking at the histogram of price, we noticed that there are several properties with abnormally high price which will potentially impact modelling fitting and sample tests. It is natural to remove them from the dataset. Furthermore, we have removed 1 listing that has over 20 bedrooms and 5 listings with more than 20 beds. 
 ```{r}
 #Distribution of Price
 ggplot(aes(price), data = data) +labs(  title = "Histogram of price", xlab = "Price") + 
@@ -160,42 +160,59 @@ ggplot(aes(log(price)), data = data) +labs(  title = "Histogram of log price", x
 ```
 
 
-
 ```{r}
-# Outliers 
-# need to check: accommodates, bathrooms, bedrooms, beds, price, cleaning_fee, minimum_nights, number_of_reviews...
-### ATTENTION many 0 bedroom! 
-### ATTENTION many outliers in security_deposit
-nrow(data)  #48377
-# nrow(data %>% filter(beds > 20)) #5
-# nrow(data %>% filter(bedrooms > 20)) #1
-# nrow(data %>% filter(bedrooms == 1 & bathrooms > 4)) #39    ##1 bedroom & 3+ bathrooms usually comes with price under 100
-# nrow(data %>% filter(price > 1500)) #137
-# nrow(data %>% filter(cleaning_fee > 200 & minimum_nights < 30)) #381   ##prefer not to use cleaning_fee
-# nrow(data %>% filter(minimum_nights > 90)) #361
-# hist(data$number_of_reviews)
-# hist(data$hosted_years)
-data <- data  %>% 
-  filter(beds <= 20, bedrooms <= 20,
-         bedrooms != 1 | bathrooms <= 4, 
-         price < 1500 & price > 0,
-         cleaning_fee <= 200 | minimum_nights >= 30,
-         minimum_nights <= 90) %>%
-  filter(property_type != "Others") #havn't decided
-nrow(data)  #37989
+# average price by room type + boroughs
+price_type <- data %>% group_by(neighbourhood_group, room_type) %>% summarise(n=n())
+setorderv(price_type, cols = "n", order = -1)
+ggplot(price_type, aes(fill=room_type, y=n, x=neighbourhood_group)) +
+        geom_bar(position="stack", stat="identity")+
+        xlab("Neighbourhood") + ylab("# of Listings")
 ```
 
-Looking at the histogram of price, we noticed that there are several properties with abnormally high price which will potentially impact modelling fitting and sample tests. It is natural to remove them from the dataset. Furthermore, we have removed 1 listing that has over 20 bedrooms and 5 listings with more than 20 beds. 
+
+
+```{r}
+# Unusual cases
+
+nrow(data)  #48377
+# show deleted numbers for each filer
+# nrow(data %>% filter(price > 2000)) #81
+# nrow(data %>% filter(price == 0 )) #10
+# nrow(data %>% filter(cleaning_fee >= 200 & price <= 100 & minimum_nights <= 10)) #37
+# nrow(data %>% filter(price >= 2000 & bathrooms <= 1 & accommodates <= 8)) #46
+# nrow(data %>% filter(minimum_nights > 90)) #361
+# nrow(data %>% filter(property_type == "Others")) #309
+```
+
+```{r}
+#deal with unusual cases
+data1 <- data  %>% 
+  filter(price > 0,
+         cleaning_fee < 200 | price > 100 | minimum_nights > 10, 
+         price < 2000 | bathrooms > 1 | accommodates > 8,
+         minimum_nights <= 90)
+nrow(data1)  #47929
+
+#last version
+# data <- data  %>% 
+#   filter(beds <= 20, bedrooms <= 20,
+#          bedrooms != 1 | bathrooms <= 4, 
+#          price < 1500 & price > 0,
+#          cleaning_fee <= 200 | minimum_nights >= 30,
+#          minimum_nights <= 90) %>%
+#   filter(property_type != "Others") #havn't decided
+```
+
+```{r}
+#Outliers
+
+```
+
 
 
 ```{r}
 #check missing value
-colSums(is.na(data))
-# data <- data %>%
-#   select(-c(weekly_price, square_feet, security_deposit))
-data <- data.table(data)
-data <- data[is.na(host_is_superhost), host_is_superhost := "0"]
-data <- data[!is.na(bathrooms) & !is.na(host_identity_verified) & !is.na(host_listings_count)]
+colSums(is.na(data))  #21 NAs in host_since, host_listings_count, host_identity_verified, hosted_years
 ```
 delete weekly_price, square_feet
 
@@ -377,8 +394,47 @@ summary(fit3)
 When number of features is large and suffer from collinearity issues, simple linear model tends to overfit and thus have high variance sample. Hence, we next conducted lasso regression as a means of regularization in order to perform feature selection, reduce variance and decrease our of sample error.
 
 ```{r}
-### TODO ###
-#copy paste lasso code here 
+### LASSO ###
+data = data[!(is.na(data$cleaning_fee)),]
+random_list <- sample(nrow(data),nrow(data)*0.7)
+train <- data[random_list,]
+test <- data[-random_list,]
+
+lasso_cv <- cv.glmnet(
+  x = data.matrix(train[,c('host_is_superhost', 'host_listings_count',  'accommodates', 
+                 'bathrooms',  'bedrooms',  'beds',  'cleaning_fee',  'minimum_nights',  'availability_365',
+                 'number_of_reviews',  'instant_bookable',  'require_guest_phone_verification',  'hosted_years', 
+                 'number_of_amenities',  'if_Manhattan',  'if_Brooklyn',  'if_Queens',  'if_Bronx',
+                 'if_private', 'if_entire', 'if_shared')]), 
+  y = train$price,
+  alpha = 1
+)
+
+lasso_reg <- glmnet(
+  x = data.matrix(train[,c('host_is_superhost', 'host_listings_count',  'accommodates', 
+                 'bathrooms',  'bedrooms',  'beds',  'cleaning_fee',  'minimum_nights',  'availability_365',
+                 'number_of_reviews',  'instant_bookable',  'require_guest_phone_verification',  'hosted_years', 
+                 'number_of_amenities',  'if_Manhattan',  'if_Brooklyn',  'if_Queens',  'if_Bronx', 
+                 'if_private', 'if_entire', 'if_shared')]), 
+  y = train$price,
+  alpha = 1,
+  lambda=lasso_cv$lambda.min
+)
+
+pred_lasso <- predict(lasso_reg, data.matrix(test[,c('host_is_superhost', 'host_listings_count',  'accommodates', 
+                 'bathrooms',  'bedrooms',  'beds',  'cleaning_fee',  'minimum_nights',  'availability_365',
+                 'number_of_reviews',  'instant_bookable',  'require_guest_phone_verification',  'hosted_years', 
+                 'number_of_amenities',  'if_Manhattan',  'if_Brooklyn',  'if_Queens',  'if_Bronx', 
+                 'if_private', 'if_entire', 'if_shared')]))
+mean((test$price - pred_lasso)^2)
+
+y = test$price
+sst <- sum((y - mean(y))^2)
+sse <- sum((pred_lasso - y)^2)
+
+# R squared
+rsq <- 1 - sse / sst
+rsq
 ```
 
 
@@ -605,21 +661,19 @@ eta(learning rate) = 0.01, max_depth = 7, min_child_weight, sub_sampling = , col
 
 ```{r}
 ## TODO## 
-## Need to update this tuned_params
 tuned_params <- list(
   eta = 0.01,
   max_depth = 7,
   min_child_weight = 1,
   subsample = 0.65,
-  colsample_bytree = 0.8
+  colsample_bytree = 0.9
 )
 
-xgb.final <- xgb.cv(
+xgb.final <- xgboost(
   params = tuned_params,
   data = features_train,
   label = response_train,
-  nrounds = 1853,
-  nfold = 5,
+  nrounds = 5000,
   objective = "reg:linear",  # for regression models
   verbose = 0,               # silent,
   early_stopping_rounds = 10 # stop if no improvement for 10 consecutive trees
