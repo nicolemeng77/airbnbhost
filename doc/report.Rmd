@@ -135,26 +135,33 @@ data <- data[property_type %in% c("Townhouse", "House", "Guesthouse", "Resort","
 data <- data[property_type %in% c("Apartment","Condominium","Guest suite","Serviced apartment"), property_type:= "Apartment"]
 data <- data[property_type %in% c("Hostel","Hotel","Boutique hotel","Aparthotel"), property_type:= "Hotel"]
 data <- data[grepl("loft", data$name), property_type := "Loft"]
+
 ```
+
+
+```{r}
+#check missing value
+#colSums(is.na(data))  #21 NAs in host_since, host_listings_count, host_identity_verified, hosted_years
+```
+
 
 
 In terms of data pre-processing, we have done some simple formatting such as removing dollar signs from price columns and changing characters to numeric mode. Also, we have changed all descriptive text to lower case, which is easier for extracting and analysing important words. Besides, the original data sets include over 30 property types, so we have merged similar ones such as "Apartment" and "Serviced apartment" and treat it as a factor with only 5 levels: Apartments, Hotel, Loft, House and Others.          
 
-In order to test whether a specific amenity such as shampoo, parking or kitchen will have significant effect on pricing. We have created new dummy variables which have the names "have_shampoo" or "have_parking", which could also be included in our predictive models.        
+In order to test whether a specific amenity such as shampoo, parking or kitchen will have significant effect on pricing. We have created new dummy variables which have the names "have_shampoo", "have_parking" and "have_kitchen", respectively which could also be included in our predictive models if their importance is proved.          
+
+Next, we have to deal with missing values. It is natural to think that a property's area is highly associated with price and hence an efficient predictor. Unfortunately, in our dataset, there are over 90% of the listings that do not have the area information. Therefore, we had no choice but deleted the "square_feet" variable. But variables such as numbers of bedrooms and room type are still available, and can somewhat provide similar information. 
 
 
-(Also, for NLP, we have removed stopwords, punctuations and special characters from the "description" and "summary". We also have extracted their stems for further text analysis.  )              
 
-
-
-# Part 3: Exploratory Date Analysis     
+# Part 4: Exploratory Date Analysis     
 
 After initial data cleaning, it's time to take a closer look at the distributions of the variables.     
 
 Firstly, we look at the histogram and density of the response variable - price. It can be seen from plot A below that this distribution is highly right skewed with some outliers. This type of distribution is not uncommon for many practical problems. However, it ruins the assumption of normality for many models and tests. Thus, we have also plotted the histogram for log price in plot B and the distribution is approximately normal. Hence, for the models or tests that assume normaility, it is necessary to include the log transformation on price.       
 
 
-We noticed that there are several properties with abnormally high price which will potentially impact modelling fitting and sample tests. It is natural to remove them from the dataset. Furthermore, we have removed 1 listing that has over 20 bedrooms and 5 listings with more than 20 beds. 
+
 ```{r}
 
 #Distribution of Price
@@ -170,26 +177,22 @@ plogprice <- ggplot(aes(log(price)), data = data) +labs(  title = "Histogram of 
   theme_minimal()
 
 ggarrange(pprice,plogprice,
-                    labels = c("A", "B"),
+                    labels = c("Figure1.A", "Figure1.B"),
                     ncol = 2, nrow = 1)
 ```
 
 
 ```{r}
 # number of listings by room type + boroughs
-price_type <- data %>% group_by(neighbourhood_group, room_type) %>% summarise(n=n())
-setorderv(price_type, cols = "n", order = -1)
-ggplot(price_type, aes(fill=room_type, y=n, x=neighbourhood_group)) +
-        geom_bar(position="stack", stat="identity")+
-        xlab("Neighbourhood") + ylab("# of Listings")
-```
+# price_type <- data %>% group_by(neighbourhood_group, room_type) %>% summarise(n=n())
+# setorderv(price_type, cols = "n", order = -1)
+# ggplot(price_type, aes(fill=room_type, y=n, x=neighbourhood_group)) +
+#         geom_bar(position="stack", stat="identity")+
+#         xlab("Neighbourhood") + ylab("# of Listings")
 
-
-
-```{r}
 # Unusual cases
 
-nrow(data)  #48377
+#nrow(data)  #48377
 # show deleted numbers for each filer
 # nrow(data %>% filter(price > 2000)) #81
 # nrow(data %>% filter(price == 0 )) #10
@@ -206,7 +209,7 @@ data1 <- data  %>%
          cleaning_fee < 200 | price > 100 | minimum_nights > 10, 
          price < 2000 | bathrooms > 1 | accommodates > 8,
          minimum_nights <= 90)
-nrow(data1)  #47929
+#nrow(data1)  #47929
 
 #last version
 # data <- data  %>% 
@@ -218,21 +221,58 @@ nrow(data1)  #47929
 #   filter(property_type != "Others") #havn't decided
 ```
 
+We noticed that there are several properties with abnormally high price which will potentially impact modelling fitting and sample tests. It is natural to remove them from the dataset. Furthermore, we have removed 1 listing that has over 20 bedrooms and 5 listings with more than 20 beds.     
+
+
+Next, in order to test the importance of certain variables, we obtain the boxplot of price relative to those variables to get a general idea if the distribution are significantly different for each level. In the following part, we take the variable borough (or "neighbourhood_group") as an example. In Figure 2.A, we can see that prices are appoximately normally distributed for all five boroughs, however, the means for these distritutions differ. It is more obvious in Figure 2.B that mean prices for Manhattan and Brooklyn are higher than other three boroughs.       
+
+
 ```{r}
-#Outliers
+data <- data %>% mutate(log_price = log(price))
+
+p1 <- data %>%
+  ggplot(aes(x = log_price, color = neighbourhood_group, fill = neighbourhood_group))+
+  geom_density(alpha = 0.4)+
+  theme_minimal()
+
+
+p2 <- data %>%
+  ggplot(aes(x = reorder(neighbourhood_group, -log_price), 
+             y = log_price, fill = neighbourhood_group))+
+  geom_boxplot(outlier.size = 0.5,alpha = 0.5)+
+  ggtitle("Log Price for 5 boroughs")+
+  xlab("")+
+  theme_minimal()+
+  theme(legend.position = "none", plot.title = element_text(hjust = 0.4))
+
+
+# p3 <- data %>%
+#   ggplot(aes(x = reorder(room_type, -log_price), 
+#              y = log_price, fill = room_type))+
+#   geom_boxplot(outlier.size = 0.5,alpha = 0.5)+
+#   ggtitle("Figure 3. Log Price for room types")+
+#   xlab("")+
+#   theme_minimal()+
+#   theme(legend.position = "none", plot.title = element_text(hjust = 0.4))
+# 
+
+ggarrange(p1,p2,
+                    labels = c("Figure2.A", "Figure2.B"),
+                    ncol = 1, nrow = 2)
+
 
 ```
+             
 
-
+In order to test the importance statistically, we have performed pairwise Wilcoxon rank sum test and get the following result. P-values are close to zero for all pairs except Staten Island and Queens. Thus we can conclude that Borough is a significant predictor for pricing. Pairwise rank sum test also confirmed the importance of room type and cancellation policy.      
 
 ```{r}
-#check missing value
-colSums(is.na(data))  #21 NAs in host_since, host_listings_count, host_identity_verified, hosted_years
+pairwise.wilcox.test(data$price, data$neighbourhood_group)
+#pairwise.wilcox.test(data$price, data$room_type)
+#pairwise.wilcox.test(data$price, data$cancellation_policy)
 ```
-delete weekly_price, square_feet
 
-Next, we have to deal with missing values. It is natural to think that a property's area is highly associated with price and hence an efficient predictor. Unfortunately, in our dataset, there are over 90% of the listings that do not have that information. Therefore, we have no choice but delete the "square_feet" variable. But variables like number of bedrooms/bathrooms and room type are still variable, and are able to somewhat represent information of areas. 
-
+Similar process have been done for the new variables created from amenities. We will take "shampoo" as an example. 
 
 ```{r}
 ###neighbourhood_group###
@@ -241,12 +281,12 @@ dat2 <- data.table(data)
 neighb_count <- dat2[, .N, keyby = neighbourhood_group] %>%
                 mutate(percent = percent(N / sum(N))) %>% 
                 mutate(label = paste(neighbourhood_group, percent))
-pie(neighb_count$N, neighb_count$label)
+#pie(neighb_count$N, neighb_count$label)
 # average price in 5 boroughs
 price_avg <- dat2 %>% group_by(neighbourhood_group) %>% 
                  summarise(Avg_price = round(mean(price, na.rm = T),2), N = n())
 setorderv(price_avg, "Avg_price",order = -1)
-price_avg
+#price_avg
 #bar plot
 barplot(price_avg$Avg_price, names.arg = price_avg$neighbourhood_group, ylim = c(0,200))
 text(x = c(0.7,1.9,3.1,4.2,5.5), y = price_avg$Avg_price + 6, labels = paste("$", price_avg$Avg_price))
@@ -261,14 +301,7 @@ pairwise.wilcox.test(data$price, data$neighbourhood_group)
 ```
 
 
-```{r}
-###neighbourhood###
-dat_m <- dat2[neighbourhood_group %in% c("Manhattan", "Brooklyn")]
-m_count <- dat_m[,.N,keyby = neighbourhood]
-setorderv(m_count,"N",order = -1)
-m_count
-barplot(m_count$N[1:5], names.arg = m_count$neighbourhood[1:5],cex.names = 0.9)
-```
+
 
 
 ```{r}
