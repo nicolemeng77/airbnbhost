@@ -6,7 +6,8 @@ output: pdf_document
 ---
 
 ```{r setup, include=FALSE}
-load("../data/orig_data.RData")
+#load("../data/orig_data.RData")
+load("../data/cleaned_data.RData")
 library(tidyverse)
 library(MASS)
 library(scales)
@@ -153,7 +154,6 @@ data <- data[grepl("loft", data$name), property_type := "Loft"]
 ```
 
 
-
 In terms of data pre-processing, we have done some simple formatting such as removing dollar signs from price columns and changing characters to numeric mode. Also, we have changed all descriptive text to lower case, which is easier for extracting and analysing important words. Besides, the original data sets include over 30 property types, so we have merged similar ones such as "Apartment" and "Serviced apartment" and treat it as a factor with only 5 levels: Apartments, Hotel, Loft, House and Others.          
 
 In order to test whether a specific amenity such as shampoo, parking or kitchen will have significant effect on pricing. We have created new dummy variables which have the names "have_shampoo", "have_parking" and "have_kitchen", respectively which could also be included in our predictive models if their importance is proved.          
@@ -164,10 +164,21 @@ Next, we have to deal with missing values. It is natural to think that a propert
 
 # Part 4: Exploratory Date Analysis     
 
-After initial data cleaning, it's time to take a closer look at the distributions of the variables.     
+After initial data cleaning, it's time to take a closer look at the distributions of the variables.      
 
-Firstly, we look at the histogram and density of the response variable - price. It can be seen from plot A below that this distribution is highly right skewed with some outliers. This type of distribution is not uncommon for many practical problems. However, it ruins the assumption of normality for many models and tests. Thus, we have also plotted the histogram for log price in plot B and the distribution is approximately normal. Hence, for the models or tests that assume normaility, it is necessary to include the log transformation on price.       
+Firstly, look at a general geographic distribution of the properties. As shown in the following barplot (Figure 1), over 85% of the properties are located in Manhattan and Brooklyn, among which Entire home/apartment and Private room are the most popular room type.      
 
+```{r}
+price_type <- data %>% group_by(neighbourhood_group, room_type) %>% summarise(n=n())
+setorderv(price_type, cols = "n", order = -1)
+ggplot(price_type, aes(fill=room_type, y=n, x=neighbourhood_group)) +
+        geom_bar(position="stack", stat="identity") +
+        xlab("Neighbourhood") + ylab("Counts") + labs(title = "Figure 1 Geographic Summary")
+```
+
+
+
+Next, we look at the histogram and density of the response variable - price. It can be seen from Figure 2.A below that this distribution is highly right skewed with some outliers. This type of distribution is not uncommon for many practical problems. However, it ruins the assumption of normality for many models and tests. Thus, we may want to try some kind of transformation so we have also obatined the distributino of log price in Figure 3.B and it is approximately normal. Hence, for the models or tests that assume normaility, it is necessary to include the log transformation on price.       
 
 
 ```{r}
@@ -185,7 +196,7 @@ plogprice <- ggplot(aes(log(price)), data = data) +labs(  title = "Histogram of 
   theme_minimal()
 
 ggarrange(pprice,plogprice,
-                    labels = c("1.A", "1.B"),
+                    labels = c("2.A", "2.B"),
                     ncol = 2, nrow = 1)
 ```
 
@@ -232,7 +243,7 @@ data1 <- data  %>%
 We noticed that there are several properties with abnormally high price which will potentially impact modelling fitting and sample tests. It is natural to remove them from the dataset. Furthermore, we have removed 1 listing that has over 20 bedrooms and 5 listings with more than 20 beds.     
 
 
-Next, in order to test the importance of certain variables, we obtain the boxplot of price relative to those variables to get a general idea if the distribution are significantly different for each level. In the following part, we take the variable borough (or "neighbourhood_group") as an example. In Figure 2.A, we can see that prices are appoximately normally distributed for all five boroughs, however, the means for these distritutions differ. It is more obvious in Figure 2.B that mean prices for Manhattan and Brooklyn are higher than other three boroughs.       
+Next, in order to test the importance of certain variables, we obtain the boxplot of price relative to those variables to get a general idea if the distribution are significantly different for each level. In the following part, we take the variable borough (or "neighbourhood_group") as an example. In Figure 3.A, we can see that prices are appoximately normally distributed for all five boroughs, however, the means for these distritutions differ. It is more obvious in Figure 3.B that mean prices for Manhattan and Brooklyn are higher than other three boroughs.       
 
 
 ```{r}
@@ -265,7 +276,7 @@ p2 <- data %>%
 # 
 
 ggarrange(p1,p2,
-                    labels = c("Figure2.A", "Figure2.B"),
+                    labels = c("Figure3.A", "Figure3.B"),
                     ncol = 1, nrow = 2)
 
 
@@ -282,7 +293,9 @@ pairwise.wilcox.test(data$price, data$neighbourhood_group)
 
 Similar process have been done for the new variables created from amenities column. We will take "shampoo" as an example.     
 
-Firstly, as shown in Figure 3.A, log price for whether there is shampoo or not are both normally distributed. And the boxplot in Figure 3.B shows that 
+Firstly, as shown in Figure 4.A, log price for whether there is shampoo or not are both normally distributed. And the boxplot in Figure 4.B shows that for all five boroughs, properties providing shampoo have higher listing prices.        
+
+
 
 ```{r}
 p1 <- data %>%
@@ -298,34 +311,37 @@ p2 <- data %>%
   theme_minimal()
 
 ggarrange(p1,p2,
-                    labels = c("Figure3.A", "Figure3.B"),
+                    labels = c("Figure4.A", "Figure4.B"),
                     ncol = 1, nrow = 2)
 ```
 
-
+Firstly, we performed F-test to see if these two groups have same variance. The result below indicates that those two groups have same variance.     
 ```{r}
-#### t test
 have_shampoo <- data %>% filter(have_shampoo == 1) %>% pull(log_price)
 not_shampoo <- data %>% filter(have_shampoo == 0) %>% pull(log_price)
 
 var.test(have_shampoo, not_shampoo)
-
+```
+        
+        
+The following t test has a p-value of approximately zero, indicating a higher mean price for properties providing shampoo.    
+```{r}
 #Equal Variance
 
+t.test(have_shampoo, not_shampoo, var.equal = T,alternative = "greater")
+```
 
-t.test(have_shampoo, not_shampoo, var.equal = T, alternative = "greater")
+        
+Furthermore, we have performed a two-way ANOVA test for shampoo and neighbourhood group. Both variables are significant with p-values less than 0.05. However, the interaction term is not significant in this case. 
 
-p-value < 0.05. Listings have shampoo have higher price!
+```{r}
 
 #### Anova to test price difference of whether have shampoo in each neighbourhood group
 
 summary(aov(log_price ~ neighbourhood_group * have_shampoo, data = data))
 ```
 
-p-value < 0.05. Listings have shampoo have higher price in each neighbourhood.
-
-
-```
+From the above results, we conclude that providing shampoo or not is an important factor for pricing. Thus, we will be including the variable "have_shampoo" in the following models. Same procedures are done for several selected amenities and we found that having shampoo, kitchen, gym and elevator are related to higher prices, while parking is not a significant factor. Interestingly, we found that properties that allow pets tends to have lower prices.      
 
 ```{r}
 ###neighbourhood_group###
