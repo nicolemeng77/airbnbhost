@@ -190,7 +190,7 @@ pprice <- ggplot(aes(price), data = data) +labs(  title = "Histogram of price", 
   theme_minimal()
 
 #Distribution of logPrice
-plogprice <- ggplot(aes(log(price)), data = data) +labs(  title = "Histogram of log price", xlab = "Price") + 
+plogprice <- ggplot(aes(log(price)), data = data) +labs(title = "Histogram of log price", xlab = "Price") + 
   geom_histogram(alpha=0.8, aes(y=..density..), fill="lightblue", col="white") +
    geom_density( col = "red") + 
   theme_minimal()
@@ -244,7 +244,9 @@ data1 <- data  %>%
 #   filter(property_type != "Others") #havn't decided
 ```
 
-We noticed that there are several properties with abnormally high price which will potentially impact modelling fitting and sample tests. It is natural to remove them from the dataset. Furthermore, we have removed 1 listing that has over 20 bedrooms and 5 listings with more than 20 beds.     
+We have noticed that there are several properties with abnormally high price, however, after investigation we noticed that not all of these properties are outliers. Some of them truly exist. They are much more larger than normal apartments and contain more bedrooms and bathrooms. Thus, we will not treat them as outliers as they are reasonably priced. However, other properties that  
+
+ Furthermore, we have removed 1 listing that has over 20 bedrooms and 5 listings with more than 20 beds.     
 
 
 Next, in order to test the importance of certain variables, we obtain the boxplot of price relative to those variables to get a general idea if the distribution are significantly different for each level. In the following part, we take the variable borough (or "neighbourhood_group") as an example. In Figure 3.A, we can see that prices are appoximately normally distributed for all five boroughs, however, the means for these distritutions differ. It is more obvious in Figure 3.B that mean prices for Manhattan and Brooklyn are higher than other three boroughs.       
@@ -347,60 +349,21 @@ summary(aov(log_price ~ neighbourhood_group * have_shampoo, data = data))
 
 From the above results, we conclude that providing shampoo or not is an important factor for pricing. Thus, we will be including the variable "have_shampoo" in the following models. Same procedures are done for several selected amenities and we found that having shampoo, kitchen, gym and elevator are related to higher prices, while parking is not a significant factor. Interestingly, we found that properties that allow pets tends to have lower prices.      
 
-```{r}
-###neighbourhood_group###
-# % of 5 boroughs
-dat2 <- data.table(data)
-neighb_count <- dat2[, .N, keyby = neighbourhood_group] %>%
-                mutate(percent = percent(N / sum(N))) %>% 
-                mutate(label = paste(neighbourhood_group, percent))
-#pie(neighb_count$N, neighb_count$label)
-# average price in 5 boroughs
-price_avg <- dat2 %>% group_by(neighbourhood_group) %>% 
-                 summarise(Avg_price = round(mean(price, na.rm = T),2), N = n())
-setorderv(price_avg, "Avg_price",order = -1)
-#price_avg
-#bar plot
-barplot(price_avg$Avg_price, names.arg = price_avg$neighbourhood_group, ylim = c(0,200))
-text(x = c(0.7,1.9,3.1,4.2,5.5), y = price_avg$Avg_price + 6, labels = paste("$", price_avg$Avg_price))
-#hist of price in 5 boroughs
-data %>% ggplot(aes(price, color = neighbourhood_group)) + geom_freqpoly()
-#boxplot
-data %>% ggplot(aes(fct_reorder(neighbourhood_group, -price), price, color = neighbourhood_group)) + geom_boxplot()
-#Wilcoxon rank-sum test
-kruskal.test(price ~ neighbourhood_group, data)
 
-pairwise.wilcox.test(data$price, data$neighbourhood_group)
-```
 
 
 
 
 
 ```{r}
-###room_type###
-# average price by room type  
-price_type <- dat2 %>% group_by(room_type) %>% summarise(avg_price = round(mean(price, na.rm = T),2))
-price_type
-barplot(height = price_type$avg_price, names.arg = price_type$room_type)
-# average price by room type + boroughs
-price_type <- data %>% group_by(neighbourhood_group, room_type) %>% summarise(n=n())
-setorderv(price_type, cols = "n", order = -1)
-ggplot(price_type, aes(fill=room_type, y=n, x=neighbourhood_group)) +
-        geom_bar(position="stack", stat="identity")+
-        xlab("Neighbourhood") + ylab("Counts")
+
 #Wilcoxon rank-sum test
 kruskal.test(price ~ room_type, data)
 #p-value < 2.2e-16, significant differences in price according to room types
 ```
 
 
-```{r}
-###hosted_years###
-#avg hosted years for five boros
-#any relationship between hosted years and avg price
-data %>% group_by(neighbourhood_group) %>% summarise(avg_hosted_years = mean(hosted_years,na.rm = T),avg_price = mean(price)) %>% arrange(desc(avg_price))
-```
+
 
 
 Else
