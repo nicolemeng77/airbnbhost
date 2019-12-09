@@ -73,13 +73,28 @@ data <- data %>%
 
 
 ```{r}
+#to lower letter, delete sign,
+data <- data %>%
+  mutate(amenities = tolower(amenities)) %>% 
+  mutate(house_rules = tolower(house_rules)) %>% 
+  mutate(name = tolower(name)) 
+
+convert_price <- function(x) as.numeric(gsub("\\$|,", "", x))
+string_split <- function(x) stringr::str_split(gsub("\\{|\\}|\"", "", x),",")
+
+data <- data %>%
+  mutate_at(c("price", "weekly_price", "cleaning_fee", "security_deposit"), convert_price) %>%
+  mutate_at("amenities", string_split) %>%
+  mutate_at('host_verifications', string_split) 
+
 #add new var
 data <- data %>% 
+  mutate(hosted_years = round(as.double(difftime(Sys.Date(), host_since)) / 365, 1)) %>%
   mutate(number_of_amenities = lengths(amenities)) %>%
   mutate(number_of_verifications = lengths(host_verifications)) %>%
   mutate(transit_level = as.numeric(is.na(transit))) %>%  #1:has description, 0:NA
     #amenity
-  mutate(rule_Pets = ifelse(grepl("no pets", data$house_rules), 0, 1)) %>%
+  mutate(rule_pets = ifelse(grepl("no pets", data$house_rules), 0, 1)) %>%
   mutate(have_pet = ifelse(grepl("cat", data$amenities) | 
                                 grepl("dog", data$amenities) | 
                                 grepl("pet", data$amenities), 1, 0)) %>%
@@ -89,30 +104,9 @@ data <- data %>%
   mutate(have_kitchen = ifelse(grepl("kitchen", data$amenities), 1, 0)) %>%
   mutate(have_parking = ifelse(grepl("parking", data$amenities), 1, 0)) %>% 
   mutate(have_elevator = ifelse(grepl("elevator", data$amenities), 1, 0)) %>% 
-  mutate(have_laptop_workspac = ifelse(grepl("Laptop friendly workspace", data$amenities), 1, 0)) %>%
-  mutate(hosted_years = round(as.double(difftime(Sys.Date(), host_since)) / 365, 1)) 
-  
-#Data Structure
-convert_price <- function(x) as.numeric(gsub("\\$|,", "", x))
-string_split <- function(x) str_split(gsub("\\{|\\}|\"", "", x),",")
+  mutate(have_laptop_workspac = ifelse(grepl("laptop friendly workspace", data$amenities), 1, 0))
 
-#delete sign, to lower letter
-data <- data %>%
-  mutate_at(c("price", "weekly_price", "cleaning_fee", "security_deposit"), convert_price) %>%
-  mutate_at("amenities", string_split) %>%
-  mutate_at('host_verifications', string_split) %>% 
-  mutate(amenities = tolower(amenities)) %>% 
-  mutate(house_rules = tolower(house_rules)) %>% 
-  mutate(name = tolower(name)) 
 
-#change logical to numeric, as.factor
-data <- data %>% 
-  mutate_if(is.logical, as.numeric) %>% # convert True False to 1,0
-  mutate_at(c("neighbourhood", "neighbourhood_group", "property_type", 
-              "room_type", "bed_type", "cancellation_policy", 'host_is_superhost', 
-              'host_identity_verified', 'instant_bookable', 'require_guest_phone_verification',
-              'host_response_time'), 
-            as.factor)
 
 #fill NA (to 0 in most cases)
 data <- data %>%
@@ -128,6 +122,18 @@ data <- data %>%
   mutate(host_identity_verified = ifelse(is.na(host_identity_verified), 0, host_identity_verified)) %>%
   mutate(hosted_years = ifelse(is.na(hosted_years), 0, hosted_years)) 
 
+
+#change logical to numeric, as.factor
+data <- data %>% 
+  mutate_if(is.logical, as.numeric) %>% # convert True False to 1,0
+  mutate_at(c("neighbourhood", "neighbourhood_group", "property_type", 
+              "room_type", "bed_type", "cancellation_policy", 'host_is_superhost', 
+              'host_identity_verified', 'instant_bookable', 'require_guest_phone_verification',
+              'host_response_time', 'transit_level', 'rule_pets', 'have_pet', 'have_shampoo', 
+              'have_gym', 'have_washer', 'have_kitchen', 'have_parking', 'have_elevator', 
+              'have_laptop_workspac'), 
+            as.factor)
+
 #combine property_type ( factors)
 data <- data.table(data)
 data <- data[property_type %in% c("Barn", "Bed and breakfast", "Boat", "Bungalow","Bus","Cabin","Camper/RV","Casa particular (Cuba)", "Castle","Cave","Cottage","Dome house","Earth house","Farm stay","Houseboat","Island","Nature lodge","Other","Tent","Timeshare","Tiny house","Yurt"), property_type:= "Others"]
@@ -135,8 +141,10 @@ data <- data[property_type %in% c("Townhouse", "House", "Guesthouse", "Resort","
 data <- data[property_type %in% c("Apartment","Condominium","Guest suite","Serviced apartment"), property_type:= "Apartment"]
 data <- data[property_type %in% c("Hostel","Hotel","Boutique hotel","Aparthotel"), property_type:= "Hotel"]
 data <- data[grepl("loft", data$name), property_type := "Loft"]
-
 ```
+
+
+
 
 
 ```{r}
@@ -177,7 +185,7 @@ plogprice <- ggplot(aes(log(price)), data = data) +labs(  title = "Histogram of 
   theme_minimal()
 
 ggarrange(pprice,plogprice,
-                    labels = c("Figure1.A", "Figure1.B"),
+                    labels = c("1.A", "1.B"),
                     ncol = 2, nrow = 1)
 ```
 
@@ -272,7 +280,52 @@ pairwise.wilcox.test(data$price, data$neighbourhood_group)
 #pairwise.wilcox.test(data$price, data$cancellation_policy)
 ```
 
-Similar process have been done for the new variables created from amenities. We will take "shampoo" as an example. 
+Similar process have been done for the new variables created from amenities column. We will take "shampoo" as an example.     
+
+Firstly, as shown in Figure 3.A, log price for whether there is shampoo or not are both normally distributed. And the boxplot in Figure 3.B shows that 
+
+```{r}
+p1 <- data %>%
+  ggplot(aes(x = log_price, color = have_shampoo, fill = have_shampoo))+
+  geom_density(alpha = 0.4)+
+  theme_minimal()
+
+p2 <- data %>%
+  ggplot(aes(x = reorder(neighbourhood_group, -log_price), 
+             y = log_price, fill = have_shampoo))+
+  geom_boxplot(outlier.size = 0.5)+
+  xlab("")+
+  theme_minimal()
+
+ggarrange(p1,p2,
+                    labels = c("Figure3.A", "Figure3.B"),
+                    ncol = 1, nrow = 2)
+```
+
+
+```{r}
+#### t test
+have_shampoo <- data %>% filter(have_shampoo == 1) %>% pull(log_price)
+not_shampoo <- data %>% filter(have_shampoo == 0) %>% pull(log_price)
+
+var.test(have_shampoo, not_shampoo)
+
+#Equal Variance
+
+
+t.test(have_shampoo, not_shampoo, var.equal = T, alternative = "greater")
+
+p-value < 0.05. Listings have shampoo have higher price!
+
+#### Anova to test price difference of whether have shampoo in each neighbourhood group
+
+summary(aov(log_price ~ neighbourhood_group * have_shampoo, data = data))
+```
+
+p-value < 0.05. Listings have shampoo have higher price in each neighbourhood.
+
+
+```
 
 ```{r}
 ###neighbourhood_group###
