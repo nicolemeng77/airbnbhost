@@ -1,6 +1,6 @@
 ---
-title: "report"
-author: "Chengyue Meng, Shuang Lu"
+title: "Airbnb Pricing Plan"
+author: "Group 13 - Shuang Lu, Hongye Jiang, Chengyue Meng, Siyu Yang, Shaofu Wang"
 date: "11/22/2019"
 output: pdf_document
 ---
@@ -28,10 +28,10 @@ library(tidymodels)
 
 # Part 1: Introduction       
 
-New York City is one of the most attactive metropolitan city for tourism, thus has fostered the Airbnb market and provide huge financial benefits for individual hosts. While making it possible to earn money without actually establishing a "business", there are lots of problems and subtleties when setting the correct price. Are hosts really making money considering all aspects apart from the most obvios factor - location? Is the property really worth the price or is it just because the host is good at advertising? Do you think providing shampoo will affect the price? Thus, our project will investigate the relationship between price and a range of pricing factors. We will be solving the problem from host's perspective instead of customer's and recommend a reasonable price or price range for the listed properties.      
+New York City is one of the most attactive metropolitan city for tourism, thus has fostered the Airbnb market and provide huge financial benefits for individual hosts. While making it possible to earn money without establishing a real business, there are lots of problems and subtleties when setting a reasonable price. Are hosts really making money considering all aspects apart from the most obvious one - location? Is the property really worth the price or is it just because the host is good at advertising? Do you think providing shampoo will affect the price? Thus, our project will investigate the relationship between price and a range of pricing factors. We will be solving the problem from the perspective of the hosts and in particular, recommend a reasonable price or price range for recently joined ones.      
 
 
-There are `r nrow(orig_data)` rows, each row presenting a listing and `r ncol(orig_data)` columns representing a possible factor. Briefly browsing the columns and we have done an initial selection of factors, removing columns such as host's name, host's location and same values shared among all hosts such as state and country information which is NY, USA for all.            
+In our raw data, there are `r nrow(orig_data)` rows, each presenting a listing and `r ncol(orig_data)` columns representing possible pricing factors. Briefly browsing the columns and we have done an initial selection of factors, removing columns such as host's name, host's location and same values shared among all hosts such as state and country information which is NY, USA for all.            
 
 
 ```{r, include=FALSE}
@@ -53,7 +53,7 @@ ncol(data)
 #colnames(data)
 ```
 
-Now we are left with `r ncol(data)` columns: `r colnames(data)`. The data contains numerical variables: number of bedrooms/bathrooms; categorial variables: neighbourhood, property types and text variables: name/description.          
+Now we are left with `r ncol(data)` columns, including numerical variables (eg: number of bedrooms/bathrooms); categorial variables(eg: neighbourhood and property types) and text variables (eg: name and description).          
 
 
 # Part 2: Data Pre-processing
@@ -133,9 +133,12 @@ data <- data[grepl("loft", data$name), property_type := "Loft"]
 
 
 
-In terms of data cleaning, we have done some simple formatting such as removing dollar sign in the price column. The original data sets include over 30 property types and some of them are quite similar, so we have merged similar ones such as "Apartment" and "Serviced apartment" and reduced to only 5 major types.      
+In terms of data pre-processing, we have done some simple formatting such as removing dollar sign from price columns and change characters to numeric mode. Besides, the original data sets include over 30 property types, so we have merged similar ones such as "Apartment" and "Serviced apartment" and treat it as factor with only 5 levels: Apartments, Hotel, Loft, House and Others.       
 
-In order to test whether a specific amenity such as shampoo, parking or kitchen will significantly change the price. We have created some new categorical variables that have values of 0s and 1s and named them with "have_shampoo" etc.       
+
+In order to test whether a specific amenity such as shampoo, parking or kitchen will have significant effect on pricing. We have created new dummy variables which have the names "have_shampoo" or "have_parking". Additionally, for later modelling, we have done one-hot encoding for categorical variables with more than two levels. For instance, for neighbourhood group,       
+
+
 
 
 (Also, for NLP, we have removed stopwords, punctuations and special characters from the "description" and "summary". We also have extracted their stems for further text analysis.  )              
