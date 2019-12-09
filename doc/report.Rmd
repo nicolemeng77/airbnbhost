@@ -1,6 +1,6 @@
 ---
 title: "report"
-author: "Chengyue Meng"
+author: "Chengyue Meng, Shuang Lu"
 date: "11/22/2019"
 output: pdf_document
 ---
@@ -11,9 +11,21 @@ library(tidyverse)
 library(MASS)
 library(scales)
 library(data.table)
+library(rsample) 
+library(randomForest)
+library(ranger) 
+library(gbm)
+library(xgboost)
+library(caret)
+library(lime)
+library(vtreat)
+library(modelr)
+library(broom)
+library(tidyr)
+library(tidymodels)
 ```
 
-#Introduction       
+# Part 1: Introduction       
 
 New York City is one of the most attactive metropolitan city for tourism, thus has fostered the Airbnb market and provide huge financial benefits for individual hosts. While making it possible to earn money without actually establishing a "business", there are lots of problems and subtleties when setting the correct price. Are hosts really making money considering all aspects apart from the most obvios factor - location? Is the property really worth the price or is it just because the host is good at advertising? Do you think providing shampoo will affect the price? Thus, our project will investigate the relationship between price and a range of pricing factors. We will be solving the problem from host's perspective instead of customer's and recommend a reasonable price or price range for the listed properties.      
 
@@ -46,11 +58,7 @@ colnames(data)
 Now we are left with `r ncol(data)` columns: `r colnames(data)`. The data contains numerical variables: number of bedrooms/bathrooms; categorial variables: neighbourhood, property types and text variables: name/description.          
 
 
-
-
-##############
-###part 1#####
-##############
+# Part 2: Data Pre-processing
 
 ```{r}
 #rename variable
@@ -124,14 +132,13 @@ Also, for NLP, we have removed stopwords, punctuations and special characters fr
 
 
 
-
 ```{r}
 # average price by room type + boroughs
 price_type <- data %>% group_by(neighbourhood_group, room_type) %>% summarise(n=n())
 setorderv(price_type, cols = "n", order = -1)
 ggplot(price_type, aes(fill=room_type, y=n, x=neighbourhood_group)) +
         geom_bar(position="stack", stat="identity")+
-        xlab("Neighbourhood") + ylab("Counts")
+        xlab("Neighbourhood") + ylab("# of Listings")
 ```
 
 
@@ -181,7 +188,6 @@ nrow(data)  #37989
 Looking at the histogram of price, we noticed that there are several properties with abnormally high price which will potentially impact modelling fitting and sample tests. It is natural to remove them from the dataset. Furthermore, we have removed 1 listing that has over 20 bedrooms and 5 listings with more than 20 beds. 
 
 
-
 ```{r}
 #check missing value
 colSums(is.na(data))
@@ -196,137 +202,7 @@ delete weekly_price, square_feet
 Next, we have to deal with missing values. It is natural to think that a property's area is highly associated with price and hence an efficient predictor. Unfortunately, in our dataset, there are over 90% of the listings that do not have that information. Therefore, we have no choice but delete the "square_feet" variable. But variables like number of bedrooms/bathrooms and room type are still variable, and are able to somewhat represent information of areas. 
 
 
-##############
-###part 2#####
-##############
-
-#Machine Learning      
-
-```{r}
-#linear regression
-fit1 <- lm(price ~ host_is_superhost + bathrooms + bedrooms + beds + number_of_reviews + instant_bookable + require_guest_phone_verification + hosted_years + number_of_amenities, data)
-summary(fit1)
-#Adjusted R-squared:  0.2092
-#multicollinearity
-car::vif(fit1)
-data <- data %>% 
-  mutate(if_Manhattan = ifelse(data$neighbourhood_group == 'Manhattan', 1, 0)) %>%
-  mutate(if_Brooklyn = ifelse(data$neighbourhood_group == 'Brooklyn', 1, 0)) %>%
-  mutate(if_Queens = ifelse(data$neighbourhood_group == 'Queens', 1, 0)) %>%
-  mutate(if_Bronx = ifelse(data$neighbourhood_group == 'Bronx', 1, 0)) 
-fit2 <- lm(price ~ bathrooms + bedrooms + beds + number_of_reviews + 
-             hosted_years + number_of_amenities + if_Manhattan + if_Brooklyn + if_Queens + if_Bronx, data)
-summary(fit2)
-#Adjusted R-squared:  0.3295 
-car::vif(fit2)
-#robust regression?  ##no conclusion
-fit3 <- rlm(price ~ bathrooms + bedrooms + beds + number_of_reviews + 
-             hosted_years + number_of_amenities + if_Manhattan + if_Brooklyn + if_Queens + if_Bronx, data)
-summary(fit3)
-#other method...
-```
-
-The first basic model we have chosen is the linear regression 
-
-
-
-
-```{r}
-#vars <- names(data)[c(7:9,11,15:21,24,26:33,36:48,53)]
-model_data <- data %>%  dplyr::select(host_is_superhost,host_listings_count,
-                              host_identity_verified,
-                      neighbourhood_group, property_type, room_type, accommodates, 
-                      bathrooms, bedrooms, beds, bed_type, price, minimum_nights,
-                      availability_365, instant_bookable, cancellation_policy, 
-                      require_guest_phone_verification, host_response_time, 
-                      number_of_amenities, number_of_verifications, transit_level,
-                      rule_Pets, have_pet, have_shampoo, have_gym, have_washer,
-                      have_kitchen, have_parking, have_elevator, have_laptop_workspac)
-#randomForest
-library(randomForest)
-library(ranger)
-# rf1 <- randomForest(price~., data = model_data)
-
-#ranger(price~., data = model_data)
-
-hyper_grid <- expand.grid(
-  mtry       = seq(8, 14, by = 2),
-  node_size  = seq(3, 6, by = 3),
-  sampe_size = c(.55, .632, .80),
-  OOB_RMSE   = 0
-)
-
-
-for(i in 1:nrow(hyper_grid)) {
-  
-  # train model
-  model <- ranger(
-    formula         = price ~ ., 
-    data            = model_data, 
-    num.trees       = 500,
-    mtry            = hyper_grid$mtry[i],
-    min.node.size   = hyper_grid$node_size[i],
-    sample.fraction = hyper_grid$sampe_size[i],
-    seed            = 123
-  )
-  
-  # add OOB error to grid
-  hyper_grid$OOB_RMSE[i] <- sqrt(model$prediction.error)
-}
-
-hyper_grid <- hyper_grid %>% 
-  dplyr::arrange(OOB_RMSE) %>%
-  head(10)
-
-saveRDS(hyper_grid,"hyper")
-
-hyper_grid
-#optimal parameters 
-
-library(rsample)
-set.seed(77)
-rf_split <- initial_split(model_data, prop = 0.8)
-rf_train <- training(rf_split)
-rf_test <- testing(rf_split)
-rf1 <- ranger(price~., data = rf_train,mtry = 8, min.node.size = 3, sample.fraction = 0.8, importance = "impurity")
-
-
-
-#OOB_RMSE <- vector(mode = "numeric", length = 10)
-
-#for(i in seq_along(OOB_RMSE)) {
-
-  optimal_ranger <- ranger(
-    formula         = price ~ ., 
-    data            = rf_train, 
-    num.trees       = 500,
-    mtry            = 10,
-    min.node.size   = 3,
-    sample.fraction = .8,
-    importance      = 'impurity'
-  )
-  
- # OOB_RMSE[i] <- sqrt(optimal_ranger$prediction.error)
-#}
-
-#hist(OOB_RMSE, breaks = 20)
-library(tidyverse)
-library(modelr)
-library(broom)
-
-library(tidyr)
-library(tidymodels)
-optimal_ranger$variable.importance %>% 
-  tidy() %>%
-  dplyr::arrange(desc(x)) %>%
-  dplyr::top_n(10) %>%
-  ggplot(aes(reorder(names, x), x)) +
-  geom_col() +
-  coord_flip() +
-  ggtitle("Top 25 important variables")
-```
-
-
+# Part 3: Exploratory Date Analysis
 
 ```{r}
 ###neighbourhood_group###
@@ -408,11 +284,6 @@ as.data.frame(cbind(name,cancel))
 ```
 
 
-
-
-###############
-###some Test###
-###############
 ```{r}
 #neighbourhood
 #assume same shape, only differ in location
@@ -466,6 +337,324 @@ step(fit,direction = "both")
 summary(lm(price ~accommodates+ bathrooms + bedrooms + beds +cleaning_fee+minimum_nights+ number_of_reviews + number_of_amenities+hosted_years, man))
 # R square 0.4164 bigger than that of the model using all numerical variables.
 # Here using less vairables, model better
+```
+
+
+# Part 4: Predictive Modeling     
+
+## Linear Regression
+
+Since the model output, price, is a continuous variable, the first baseline model we have chosen is linear regression 
+
+```{r}
+#linear regression
+fit1 <- lm(price ~ host_is_superhost + bathrooms + bedrooms + beds + number_of_reviews + instant_bookable + require_guest_phone_verification + hosted_years + number_of_amenities, data)
+
+summary(fit1)
+#Adjusted R-squared:  0.2092
+#multicollinearity
+car::vif(fit1)
+data <- data %>% 
+  mutate(if_Manhattan = ifelse(data$neighbourhood_group == 'Manhattan', 1, 0)) %>%
+  mutate(if_Brooklyn = ifelse(data$neighbourhood_group == 'Brooklyn', 1, 0)) %>%
+  mutate(if_Queens = ifelse(data$neighbourhood_group == 'Queens', 1, 0)) %>%
+  mutate(if_Bronx = ifelse(data$neighbourhood_group == 'Bronx', 1, 0)) 
+
+fit2 <- lm(price ~ bathrooms + bedrooms + beds + number_of_reviews + 
+             hosted_years + number_of_amenities + if_Manhattan + if_Brooklyn + if_Queens + if_Bronx, data)
+summary(fit2)
+#Adjusted R-squared:  0.3295 
+car::vif(fit2)
+#robust regression?  ##no conclusion
+fit3 <- rlm(price ~ bathrooms + bedrooms + beds + number_of_reviews + 
+             hosted_years + number_of_amenities + if_Manhattan + if_Brooklyn + if_Queens + if_Bronx, data)
+summary(fit3)
+#other method...
+```
+
+## Regularized Linear Regression
+
+When number of features is large and suffer from collinearity issues, simple linear model tends to overfit and thus have high variance sample. Hence, we next conducted lasso regression as a means of regularization in order to perform feature selection, reduce variance and decrease our of sample error.
+
+```{r}
+### TODO ###
+#copy paste lasso code here 
+```
+
+
+## Random Forest
+
+Next we train a random forest regression model since it works well with categorical variables and missing values.
+We prepared model data by splitig dataset as 70% train and 30% test and we used OOB (out-of-bag) error as validation error rate.
+
+```{r}
+model_data <- data %>%  dplyr::select(host_is_superhost,host_listings_count,
+                              host_identity_verified,
+                      neighbourhood_group, property_type, room_type, accommodates, 
+                      bathrooms, bedrooms, beds, bed_type, price, minimum_nights,
+                      availability_365, instant_bookable, cancellation_policy, 
+                      require_guest_phone_verification, host_response_time, 
+                      number_of_amenities, number_of_verifications, transit_level,
+                      rule_Pets, have_pet, have_shampoo, have_gym, have_washer,
+                      have_kitchen, have_parking, have_elevator, have_laptop_workspac)
+
+set.seed(0)
+split <- rsample::initial_split(model_data, prop = 0.7)
+data_train <- training(split)
+data_test <- testing(split)
+```
+
+Then we fitted a basic random forest model with *ranger* package. We pick number of trees to be 500 as default and  *mtry* parameters, which is number of features to pick for each split, to be $\frac{\# of features}{3}$ as default optimal number.
+
+```{r}
+rf <- ranger(
+  formula   = price ~ ., 
+  data      = data_train, 
+  num.trees = 500,
+  mtry      = floor((ncol(model_data)-1) / 3))
+```
+
+
+For this random forest model, we achieved `r rf$r.squared` OOB R squared and `r rf$prediction.error` OOB MSE. It already outperformed linear regression, but we still needed to fine tune model parameters to further improve predicting accuracy. Hence we conducted hyperparameter tuning through full grid search.
+
+```{r}
+hyper_grid <- expand.grid(
+  mtry       = c(6,9,12),
+  node_size  = c(3,5,7),
+  sampe_size = c(.632, .80),
+  OOB_RMSE   = 0
+)
+
+for(i in 1:nrow(hyper_grid)) {
+
+  model <- ranger(
+    formula         = price ~ .,
+    data            = data_train,
+    num.trees       = 500,
+    mtry            = hyper_grid$mtry[i],
+    min.node.size   = hyper_grid$node_size[i],
+    sample.fraction = hyper_grid$sampe_size[i],
+    seed            = 0
+  )
+
+  # add OOB error to grid
+  hyper_grid$OOB_RMSE[i] <- sqrt(model$prediction.error)
+}
+ 
+hyper_grid %>%
+  dplyr::arrange(OOB_RMSE) %>%
+  head(10)
+```
+
+The grid we constructed contains `r nrow(hyper_grid)` number of parameters combinations.
+Our tuning result shows that the optimal parameters to be num.trees = 500, mtry = 9 , 
+min.node.size = 3 and sample.fraction = 0.8 for our model.
+
+```{r}
+optimal_ranger <- ranger(
+  formula         = price ~ ., 
+  data            = data_train, 
+  num.trees       = 500,
+  mtry            = 9,
+  min.node.size   = 3,
+  sample.fraction = .8,
+  importance      = 'impurity'
+)
+```
+
+```{r}
+optimal_ranger$variable.importance %>% 
+  tidy() %>% 
+  dplyr::arrange(desc(x)) %>%
+  dplyr::top_n(15) %>%
+  ggplot(aes(reorder(names, x), x)) +
+  geom_col(fill = "lightblue") +
+  ggtitle("Top 15 important variables")+
+  xlab("")+
+  ylab("")+
+  coord_flip() +
+  theme_classic()
+```
+
+From the variable importance plot, we can see that top 3 variables picked up by random forest model is 
+room_type, accomodates, bathrooms.
+
+
+```{r}
+pred <- predict(optimal_ranger, data_test)
+MSE_RF <- mean((pred$predictions - data_test$price)^2)
+MSE_RF
+```
+
+We achieved final test MSE of `r MSE_RF` by random forest model.
+
+
+
+## XGBoost
+
+Then we move on to xgboost model in hope to further improve prediction power. Whereas random forests build an ensemble of deep independent trees, XGBoosts build an ensemble of shallow and weak successive trees with each tree learning and improving on the previous. When combined, these many weak successive trees produce a powerful “committee” that are often hard to beat with other algorithms.
+
+For data preparation, we performed one-hot encoding for categorical variables using *vtreat* package since
+XGBoost only works with matrices that contain all numeric variables.
+
+```{r}
+# variable names
+features <- setdiff(names(data_train), "price")
+
+# Create the treatment plan from the training data
+treatplan <- vtreat::designTreatmentsZ(data_train, features, verbose = FALSE)
+
+# Get the "clean" variable names from the scoreFrame
+new_vars <- treatplan %>%
+  magrittr::use_series(scoreFrame) %>%        
+  dplyr::filter(code %in% c("clean", "lev")) %>% 
+  magrittr::use_series(varName)     
+
+# Prepare the training data
+features_train <- vtreat::prepare(treatplan, data_train, varRestriction = new_vars) %>% as.matrix()
+response_train <- data_train$price
+
+# Prepare the test data
+features_test <- vtreat::prepare(treatplan, data_test, varRestriction = new_vars) %>% as.matrix()
+response_test <- data_test$price
+```
+
+
+```{r}
+set.seed(0)
+
+xgb.fit <- xgb.cv(
+  data = features_train,
+  label = response_train,
+  nrounds = 1000,
+  nfold = 5,
+  objective = "reg:linear",  # for regression models
+  verbose = 0,               # silent,
+  early_stopping_rounds = 10 # stop if no improvement for 10 consecutive trees
+)
+
+xgb.fit$evaluation_log %>%
+  dplyr::summarise(
+    ntrees.train = which(train_rmse_mean == min(train_rmse_mean))[1],
+    rmse.train   = min(train_rmse_mean),
+    ntrees.test  = which(test_rmse_mean == min(test_rmse_mean))[1],
+    rmse.test   = min(test_rmse_mean)
+  )
+```
+
+```{r}
+# plot error vs number trees
+ggplot(xgb.fit$evaluation_log) +
+  geom_line(aes(iter, train_rmse_mean), color = "red") +
+  geom_line(aes(iter, test_rmse_mean), color = "blue")
+```
+
+From the plot above, we can see how training and test RMSE decreases as the number of trees grows. 
+And Test RMSE 74.93852 reached minumun as 74.93852. 
+
+```{r, eval=False}
+## TODO ## 
+## Need to update this grid ##
+hyper_grid <- expand.grid(
+  eta = c(0.05, 0.1, 0.3),
+  max_depth = c(3,5, 7), 
+  min_child_weight = c(1, 3, 5), 
+  subsample = c(0.65, 0.8), 
+  colsample_bytree = c(.8, 1), 
+  optimal_trees = 0,               # a place to dump results
+  min_RMSE = 0                     # a place to dump results
+)
+
+for(i in 1:nrow(hyper_grid)) {
+  
+  # create parameter list
+  params <- list(
+    eta = hyper_grid$eta[i],
+    max_depth = hyper_grid$max_depth[i],
+    min_child_weight = hyper_grid$min_child_weight[i],
+    subsample = hyper_grid$subsample[i],
+    colsample_bytree = hyper_grid$colsample_bytree[i]
+  )
+  
+  set.seed(0)
+  
+  # train model
+  xgb.tune <- xgb.cv(
+    params = params,
+    data = features_train,
+    label = response_train,
+    nrounds = 5000,
+    nfold = 5,
+    objective = "reg:linear",  # for regression models
+    verbose = 0,               # silent,
+    early_stopping_rounds = 10 # stop if no improvement for 10 consecutive trees
+  )
+  
+  # add min training error and trees to grid
+  hyper_grid2$optimal_trees[i] <- which.min(xgb.tune$evaluation_log$test_rmse_mean)
+  hyper_grid2$min_RMSE[i] <- min(xgb.tune$evaluation_log$test_rmse_mean)
+} 
+
+hyper_grid %>% 
+  dplyr::arrange(min_RMSE) %>%
+  head(10)
+```
+
+We again tuned our xgoost model parameters through grid search and find the optimal paramters to be :
+eta(learning rate) = 0.01, max_depth = 7, min_child_weight, sub_sampling = , colsample_bytree = .
+
+```{r}
+## TODO## 
+## Need to update this tuned_params
+tuned_params <- list(
+  eta = 0.01,
+  max_depth = 7,
+  min_child_weight = 1,
+  subsample = 0.65,
+  colsample_bytree = 0.8
+)
+
+xgb.final <- xgb.cv(
+  params = tuned_params,
+  data = features_train,
+  label = response_train,
+  nrounds = 1853,
+  nfold = 5,
+  objective = "reg:linear",  # for regression models
+  verbose = 0,               # silent,
+  early_stopping_rounds = 10 # stop if no improvement for 10 consecutive trees
+)
+
+pred <- predict(xgb.final, features_test)
+
+# results
+MSE_XGBoost <- (caret::RMSE(pred, response_test))^2
+MSE_XGBoost
+```
+
+We then fed the optimal model parameters to test dataset and achieved test MSE to be AAAAA, which is slightly improved from the random forest model.
+
+```{r}
+# create importance matrix
+importance_matrix <- xgb.importance(model = xgb.final)
+
+# variable importance plot
+xgb.plot.importance(importance_matrix, top_n = 10, measure = "Gain")
+```
+
+For XGBoost model, the top 3 influential variables are AAAA, BBBB, CCCC. (Similar or different from random forest???)
+
+```{r}
+### TODO ###
+## Optional Include LIME visualizaiton 
+
+# # one-hot encode the local observations to be assessed.
+# local_obs_onehot <- vtreat::prepare(treatplan, local_obs, varRestriction = new_vars)
+# 
+# # apply LIME
+# explainer <- lime(data.frame(features_train), xgb.fit.final)
+# explanation <- explain(local_obs_onehot, explainer, n_features = 5)
+# plot_features(explanation)
 ```
 
 
