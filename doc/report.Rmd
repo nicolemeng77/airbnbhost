@@ -499,7 +499,13 @@ rf <- ranger(
 ```
 
 
-For this random forest model, we achieved `r rf$r.squared` OOB R squared and `r rf$prediction.error` OOB MSE. It already outperformed linear regression, but we still needed to fine tune model parameters to further improve predicting accuracy. Hence we conducted hyperparameter tuning through full grid search.
+For this random forest model, we achieved `r rf$r.squared` OOB R squared and `r rf$prediction.error` OOB MSE. It already outperformed linear regression, but we still needed to fine tune model parameters to further improve predicting accuracy. Hence we conducted hyperparameter tuning through full grid search on three parameters:
+
+* mtry: The number of variables to randomly sample as candidates at each split. We picked a sequence evenly space around the default number 9.
+
+* nodesize: Minimum number of samples within the terminal nodes. While smaller nodesize produces deep, complex trees and will introduce more variance, large nodesize produces shallow trees and will introduce more bias. Hence we picked a sequence of 3, 5 and 7 in hope to find the optimal balance of this bias-variance tradeoff situation.
+
+* sampsize: The number of samples to train on. This is another bias-variance tradeoff situation as lower sampsize introduces bias and higher sampsize introduces variance. Hence we picked two numbers 0.632, the expected value of unique observations in the bootstrap sample, and 0.8, a reasonabally higher portion. 
 
 ```{r}
 hyper_grid <- expand.grid(
@@ -508,7 +514,9 @@ hyper_grid <- expand.grid(
   sampe_size = c(.632, .80),
   OOB_RMSE   = 0
 )
+```
 
+```{r,eval=False}
 for(i in 1:nrow(hyper_grid)) {
 
   model <- ranger(
@@ -531,8 +539,8 @@ hyper_grid %>%
 ```
 
 The grid we constructed contains `r nrow(hyper_grid)` number of parameters combinations.
-Our tuning result shows that the optimal parameters to be num.trees = 500, mtry = 9 , 
-min.node.size = 3 and sample.fraction = 0.8 for our model.
+Our tuning result shows that the optimal parameters to be num.trees = 500, mtry = 9 , min.node.size = 3 and sample.fraction = 0.8. Then we went ahead feed the tuned parameters into our random forest model and performed
+visualization and prediction based on this final model.
 
 ```{r}
 optimal_ranger <- ranger(
@@ -560,8 +568,7 @@ optimal_ranger$variable.importance %>%
   theme_classic()
 ```
 
-From the variable importance plot, we can see that top 3 variables picked up by random forest model is 
-room_type, accomodates, bathrooms.
+From the variable importance plot, we can see that top 3 variables that are influential to the price under random forest model is room_type, longitude and accomodates,  !!!! MAY NEED TO UPDATE !!!!!!!. They are all in line with intuition.
 
 
 ```{r}
@@ -570,13 +577,12 @@ MSE_RF <- mean((pred$predictions - data_test$price)^2)
 MSE_RF
 ```
 
-We achieved final test MSE of `r MSE_RF` by random forest model.
-
+We achieved final test MSE of `r MSE_RF` by random forest model, which has a ingnificant drop from linear regression and lasso models.
 
 
 ## XGBoost
 
-Then we move on to xgboost model in hope to further improve prediction power. Whereas random forests build an ensemble of deep independent trees, XGBoosts build an ensemble of shallow and weak successive trees with each tree learning and improving on the previous. When combined, these many weak successive trees produce a powerful “committee” that are often hard to beat with other algorithms.
+Then we moved on to xgboost model in hope to further improve prediction power. Whereas random forests build an ensemble of deep independent trees, XGBoosts build an ensemble of shallow and weak successive trees with each tree learning and improving on the previous. When combined, these many weak successive trees produce a powerful “committee” that are often hard to beat with other algorithms.
 
 For data preparation, we performed one-hot encoding for categorical variables using *vtreat* package since
 XGBoost only works with matrices that contain all numeric variables.
@@ -603,6 +609,7 @@ features_test <- vtreat::prepare(treatplan, data_test, varRestriction = new_vars
 response_test <- data_test$price
 ```
 
+We started with a basic XGBoost model with 1000 rounds and 5-fold cross validation. We picked objective function to be linear because of our continous dependent variable and early_stopping_rounds to be 10, which stops training if there is no improvement for ten consecutive trees.
 
 ```{r}
 set.seed(0)
@@ -616,14 +623,13 @@ xgb.fit <- xgb.cv(
   verbose = 0,               # silent,
   early_stopping_rounds = 10 # stop if no improvement for 10 consecutive trees
 )
-
-xgb.fit$evaluation_log %>%
-  dplyr::summarise(
-    ntrees.train = which(train_rmse_mean == min(train_rmse_mean))[1],
-    rmse.train   = min(train_rmse_mean),
-    ntrees.test  = which(test_rmse_mean == min(test_rmse_mean))[1],
-    rmse.test   = min(test_rmse_mean)
-  )
+# xgb.fit$evaluation_log %>%
+#   dplyr::summarise(
+#     ntrees.train = which(train_rmse_mean == min(train_rmse_mean))[1],
+#     rmse.train   = min(train_rmse_mean),
+#     ntrees.test  = which(test_rmse_mean == min(test_rmse_mean))[1],
+#     rmse.test   = min(test_rmse_mean)
+#   )
 ```
 
 ```{r}
@@ -633,8 +639,7 @@ ggplot(xgb.fit$evaluation_log) +
   geom_line(aes(iter, test_rmse_mean), color = "blue")
 ```
 
-From the plot above, we can see how training and test RMSE decreases as the number of trees grows. 
-And Test RMSE 74.93852 reached minumun as 74.93852. 
+From the plot above, we observed how training and test RMSE decreases as the number of trees grows. The training process stopped around 50 iterations when training RMSE stopped decreasing and the minumum Test RMSE we achieved is 74.93852 at around 40th iteration. 
 
 ```{r, eval=False}
 ## TODO ## 
@@ -684,8 +689,15 @@ hyper_grid %>%
   head(10)
 ```
 
-We again tuned our xgoost model parameters through grid search and find the optimal paramters to be :
-eta(learning rate) = 0.01, max_depth = 7, min_child_weight, sub_sampling = , colsample_bytree = .
+We again tuned our xgoost model parameters through full grid search on five parameters:
+* eta: learning rate
+* max_depth: tree depth
+* min_child_weight: minimum number of observations required in each terminal node
+* subsample: percent of training data to sample for each tree
+* colsample_bytrees: percent of columns to sample from for each tree
+
+The tuning results are: eta = 0.01, max_depth = 7, min_child_weight = 1, 
+sub_sampling = 0.65, colsample_bytree = 0.9.
 
 ```{r}
 ## TODO## 
@@ -714,7 +726,7 @@ MSE_XGBoost <- (caret::RMSE(pred, response_test))^2
 MSE_XGBoost
 ```
 
-We then fed the optimal model parameters to test dataset and achieved test MSE to be 68.57523, which is slightly improved from the random forest model.
+We fed the optimal model parameters to test dataset and achieved test MSE to be 68.57523, which is slightly improved from the random forest model.
 
 ```{r}
 # create importance matrix
@@ -724,7 +736,7 @@ importance_matrix <- xgb.importance(model = xgb.final)
 xgb.plot.importance(importance_matrix, top_n = 10, measure = "Gain")
 ```
 
-For XGBoost model, the top 3 influential variables are accommodates, bathrooms, availability_365 (Similar or different from random forest)
+For XGBoost model, the top 3 influential variables are accommodates, bathrooms, availability_365. 
 
 ```{r}
 ### TODO ###
