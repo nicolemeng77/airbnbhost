@@ -1,0 +1,779 @@
+---
+title: "R Notebook"
+output: pdf_notebook
+header-includes:
+    - \usepackage{setspace}\doublespacing
+fontsize: 12pt
+---
+
+```{r}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+```{r setup, include=FALSE}
+#load("../data/orig_data.RData")
+load("../data/cleaned_data.RData")
+library(tidyverse)
+library(MASS)
+library(scales)
+library(data.table)
+library(rsample) 
+library(randomForest)
+library(glmnet)
+library(ranger) 
+library(gbm)
+library(xgboost)
+library(caret)
+library(lime)
+library(vtreat)
+library(modelr)
+library(broom)
+library(MLmetrics)
+library(tidyr)
+library(tidymodels)
+library(ggpubr)
+```
+
+# Part 1: Introduction       
+
+New York City is one of the most attactive metropolitan city for tourism, thus has fostered the Airbnb market and provide huge financial benefits for individual hosts. While making it possible to earn money without establishing a real business, there are lots of problems and subtleties when setting a reasonable price. Are hosts really making money considering all aspects apart from the most obvious one - location? Is the property really worth the price or is it just because the host is good at advertising? Do you think providing shampoo will affect the price? Thus, our project will investigate the effects of a range of pricing factors. We will be solving the problem from the perspective of the hosts and in particular, help them to set reasonable prices for recently listed properties.       
+
+# Part 2: Objective and Data Source       
+
+The goal of our project is to investigate and model the relationship between Airbnb listing prices and a range of pricing factors. And use the models to predict and recommend reasonable prices or price ranges for recently joined hosts based on current market condition.         
+
+Our original dataset is retrieved from Inside Airbnb website (http://insideairbnb.com/get-the-data.html
+), which include current Airbnb listing details in New York area. In our raw data, there are `r nrow(orig_data)` rows, each presenting a listing and `r ncol(orig_data)` columns representing possible pricing factors. Briefly browsing the columns and we have done an initial selection of factors, removing columns such as host's name, host's location and same values shared among all hosts such as state and country information which is NY, USA for all.            
+
+
+```{r, include=FALSE}
+#ignore useless variables
+data <- orig_data %>% dplyr::select(id,name,description, transit, house_rules, host_since, host_is_superhost, 
+                             host_listings_count, host_identity_verified, neighbourhood_cleansed, square_feet,
+                             neighbourhood_group_cleansed, zipcode, latitude, longitude, property_type, 
+                             room_type, accommodates, bathrooms, bedrooms, beds,bed_type, amenities, price,
+                             weekly_price, cleaning_fee, minimum_nights, availability_365,
+                             number_of_reviews, instant_bookable, cancellation_policy, 
+                             require_guest_phone_verification,
+                             host_response_time, host_verifications, security_deposit)
+```
+
+
+```{r}
+#nrow(data)
+#ncol(data)
+#colnames(data)
+```
+
+Now we are left with `r ncol(data)` columns, including numerical variables (eg: number of bedrooms/bathrooms); categorial variables(eg: neighbourhood and property types) and text variables (eg: name and description).          
+
+
+# Part 3: Data Pre-processing
+
+```{r}
+#rename variable
+data <- data %>% 
+  rename(neighbourhood = neighbourhood_cleansed, 
+         neighbourhood_group = neighbourhood_group_cleansed) 
+```
+
+
+```{r}
+#to lower letter, delete sign,
+data <- data %>%
+  mutate(amenities = tolower(amenities)) %>% 
+  mutate(house_rules = tolower(house_rules)) %>% 
+  mutate(name = tolower(name)) 
+
+convert_price <- function(x) as.numeric(gsub("\\$|,", "", x))
+string_split <- function(x) stringr::str_split(gsub("\\{|\\}|\"", "", x),",")
+
+data <- data %>%
+  mutate_at(c("price", "weekly_price", "cleaning_fee", "security_deposit"), convert_price) %>%
+  mutate_at("amenities", string_split) %>%
+  mutate_at('host_verifications', string_split) 
+
+#add new var
+data <- data %>% 
+  mutate(hosted_years = round(as.double(difftime(Sys.Date(), host_since)) / 365, 1)) %>%
+  mutate(number_of_amenities = lengths(amenities)) %>%
+  mutate(number_of_verifications = lengths(host_verifications)) %>%
+  mutate(transit_level = as.numeric(is.na(transit))) %>%  #1:has description, 0:NA
+    #amenity
+  mutate(rule_pets = ifelse(grepl("no pets", data$house_rules), 0, 1)) %>%
+  mutate(have_pet = ifelse(grepl("cat", data$amenities) | 
+                                grepl("dog", data$amenities) | 
+                                grepl("pet", data$amenities), 1, 0)) %>%
+  mutate(have_shampoo = ifelse(grepl("shampoo", data$amenities), 1, 0)) %>%
+  mutate(have_gym = ifelse(grepl("gym", data$amenities), 1, 0)) %>%
+  mutate(have_washer = ifelse(grepl("washer", data$amenities), 1, 0)) %>%
+  mutate(have_kitchen = ifelse(grepl("kitchen", data$amenities), 1, 0)) %>%
+  mutate(have_parking = ifelse(grepl("parking", data$amenities), 1, 0)) %>% 
+  mutate(have_elevator = ifelse(grepl("elevator", data$amenities), 1, 0)) %>% 
+  mutate(have_laptop_workspac = ifelse(grepl("laptop friendly workspace", data$amenities), 1, 0))
+
+
+
+#fill NA (to 0 in most cases)
+data <- data %>%
+  mutate(host_is_superhost = ifelse(is.na(host_is_superhost), 0, host_is_superhost)) %>%
+  mutate(bathrooms = ifelse(is.na(bathrooms), 0, bathrooms)) %>%
+  mutate(bedrooms = ifelse(is.na(bedrooms), 0, bedrooms)) %>%
+  mutate(beds = ifelse(is.na(beds), 0, beds)) %>%
+  mutate(number_of_reviews = ifelse(is.na(number_of_reviews), 0, number_of_reviews)) %>%
+  mutate(host_response_time = ifelse(is.na(host_response_time), 'no_record', host_response_time)) %>%
+  mutate(cleaning_fee = ifelse(is.na(cleaning_fee), 0, cleaning_fee)) %>%
+  mutate(security_deposit = ifelse(is.na(security_deposit), 0, security_deposit)) %>%
+  mutate(host_listings_count = ifelse(is.na(host_listings_count), 0, host_listings_count)) %>%
+  mutate(host_identity_verified = ifelse(is.na(host_identity_verified), 0, host_identity_verified)) %>%
+  mutate(hosted_years = ifelse(is.na(hosted_years), 0, hosted_years)) 
+
+
+#change logical to numeric, as.factor
+data <- data %>% 
+  mutate_if(is.logical, as.numeric) %>% # convert True False to 1,0
+  mutate_at(c("neighbourhood", "neighbourhood_group", "property_type", 
+              "room_type", "bed_type", "cancellation_policy", 'host_is_superhost', 
+              'host_identity_verified', 'instant_bookable', 'require_guest_phone_verification',
+              'host_response_time', 'transit_level', 'rule_pets', 'have_pet', 'have_shampoo', 
+              'have_gym', 'have_washer', 'have_kitchen', 'have_parking', 'have_elevator', 
+              'have_laptop_workspac'), 
+            as.factor)
+
+#combine property_type ( factors)
+data <- data.table(data)
+data <- data[property_type %in% c("Barn", "Bed and breakfast", "Boat", "Bungalow","Bus","Cabin","Camper/RV","Casa particular (Cuba)", "Castle","Cave","Cottage","Dome house","Earth house","Farm stay","Houseboat","Island","Nature lodge","Other","Tent","Timeshare","Tiny house","Yurt"), property_type:= "Others"]
+data <- data[property_type %in% c("Townhouse", "House", "Guesthouse", "Resort","Villa","Tiny house"), property_type:= "House"]
+data <- data[property_type %in% c("Apartment","Condominium","Guest suite","Serviced apartment"), property_type:= "Apartment"]
+data <- data[property_type %in% c("Hostel","Hotel","Boutique hotel","Aparthotel"), property_type:= "Hotel"]
+data <- data[grepl("loft", data$name), property_type := "Loft"]
+```
+
+
+
+
+
+```{r}
+#check missing value
+#colSums(is.na(data))  #21 NAs in host_since, host_listings_count, host_identity_verified, hosted_years
+```
+
+
+In terms of data pre-processing, we have done some simple formatting such as removing dollar signs from price columns and changing characters to numeric mode. Also, we have changed all descriptive text to lower case, which is easier for extracting and analysing important words. Besides, the original data sets include over 30 property types, so we have merged similar ones such as "Apartment" and "Serviced apartment" and treat it as a factor with only 5 levels: Apartments, Hotel, Loft, House and Others.          
+
+In order to test whether a specific amenity such as shampoo, parking or kitchen will have significant effect on pricing. We have created new dummy variables which have the names "have_shampoo", "have_parking" and "have_kitchen", respectively which could also be included in our predictive models if their importance is proved.          
+
+Next, we have to deal with missing values. It is natural to think that a property's area is highly associated with price and hence an efficient predictor. Unfortunately, in our dataset, there are over 90% of the listings that do not have the area information. Therefore, we had no choice but deleted the "square_feet" variable. But variables such as numbers of bedrooms and room type are still available, and can somewhat provide similar information. 
+
+
+
+# Part 4: Exploratory Date Analysis     
+
+After initial data cleaning, it's time to take a closer look at the distributions of the variables.      
+
+Firstly, look at a general geographic distribution of the properties. As shown in the following barplot (Figure 1), over 85% of the properties are located in Manhattan and Brooklyn, among which Entire home/apartment and Private room are the most popular room type.      
+
+```{r}
+price_type <- data %>% group_by(neighbourhood_group, room_type) %>% summarise(n=n())
+setorderv(price_type, cols = "n", order = -1)
+ggplot(price_type, aes(fill=room_type, y=n, x=neighbourhood_group)) +
+        geom_bar(position="stack", stat="identity") +
+        xlab("Neighbourhood") + ylab("Counts") + labs(title = "Figure 1 Geographic Summary")
+```
+
+
+
+Next, we look at the histogram and density of the response variable - price. It can be seen from Figure 2.A below that this distribution is highly right skewed with some outliers. This type of distribution is not uncommon for many practical problems. However, it ruins the assumption of normality for many models and tests. Thus, we may want to try some kind of transformation so we have also obatined the distributino of log price in Figure 3.B and it is approximately normal. Hence, for the models or tests that assume normaility, it is necessary to include the log transformation on price.       
+
+
+```{r}
+
+#Distribution of Price
+pprice <- ggplot(aes(price), data = data) +labs(  title = "Histogram of price", xlab = "Price") + 
+  geom_histogram(alpha=0.8, aes(y=..density..), fill="lightblue", col="white") +
+   geom_density( col = "red") + 
+  theme_minimal()
+
+#Distribution of logPrice
+plogprice <- ggplot(aes(log(price)), data = data) +labs(title = "Histogram of log price", xlab = "Price") + 
+  geom_histogram(alpha=0.8, aes(y=..density..), fill="lightblue", col="white") +
+   geom_density( col = "red") + 
+  theme_minimal()
+
+ggarrange(pprice,plogprice,
+                    labels = c("2.A", "2.B"),
+                    ncol = 2, nrow = 1)
+
+```
+
+
+
+
+
+```{r}
+# number of listings by room type + boroughs
+# price_type <- data %>% group_by(neighbourhood_group, room_type) %>% summarise(n=n())
+# setorderv(price_type, cols = "n", order = -1)
+# ggplot(price_type, aes(fill=room_type, y=n, x=neighbourhood_group)) +
+#         geom_bar(position="stack", stat="identity")+
+#         xlab("Neighbourhood") + ylab("# of Listings")
+
+# Unusual cases
+
+#nrow(data)  #48377
+# show deleted numbers for each filer
+# nrow(data %>% filter(price > 2000)) #81
+# nrow(data %>% filter(price == 0 )) #10
+# nrow(data %>% filter(cleaning_fee >= 200 & price <= 100 & minimum_nights <= 10)) #37
+# nrow(data %>% filter(price >= 2000 & bathrooms <= 1 & accommodates <= 8)) #46
+# nrow(data %>% filter(minimum_nights > 90)) #361
+# nrow(data %>% filter(property_type == "Others")) #309
+```
+
+```{r}
+#deal with unusual cases
+data <- data  %>% 
+  filter(price > 0,
+         cleaning_fee < 200 | price > 100 | minimum_nights > 10, 
+         price < 2000 | bathrooms > 1 | accommodates > 8,
+         minimum_nights <= 90)
+#nrow(data1)  #47929
+
+#last version
+# data <- data  %>% 
+#   filter(beds <= 20, bedrooms <= 20,
+#          bedrooms != 1 | bathrooms <= 4, 
+#          price < 1500 & price > 0,
+#          cleaning_fee <= 200 | minimum_nights >= 30,
+#          minimum_nights <= 90) %>%
+#   filter(property_type != "Others") #havn't decided
+```
+
+We have noticed that there are several properties with abnormally high price, however, after investigation we noticed that not all of these properties are outliers. Some of them truly exist. They are much more larger than normal apartments and contain more bedrooms and bathrooms. Thus, we will not treat them as outliers as they are reasonably priced. However, other properties that  
+
+ Furthermore, we have removed 1 listing that has over 20 bedrooms and 5 listings with more than 20 beds.     
+
+
+Next, in order to test the importance of certain variables, we obtain the boxplot of price relative to those variables to get a general idea if the distribution are significantly different for each level. In the following part, we take the variable borough (or "neighbourhood_group") as an example. In Figure 3.A, we can see that prices are appoximately normally distributed for all five boroughs, however, the means for these distritutions differ. It is more obvious in Figure 3.B that mean prices for Manhattan and Brooklyn are higher than other three boroughs.       
+
+
+```{r}
+data <- data %>% mutate(log_price = log(price))
+
+p1 <- data %>%
+  ggplot(aes(x = log_price, color = neighbourhood_group, fill = neighbourhood_group))+
+  geom_density(alpha = 0.4)+
+  theme_minimal()
+
+
+p2 <- data %>%
+  ggplot(aes(x = reorder(neighbourhood_group, -log_price), 
+             y = log_price, fill = neighbourhood_group))+
+  geom_boxplot(outlier.size = 0.5,alpha = 0.5)+
+  ggtitle("Log Price for 5 boroughs")+
+  xlab("")+
+  theme_minimal()+
+  theme(legend.position = "none", plot.title = element_text(hjust = 0.4))
+
+
+# p3 <- data %>%
+#   ggplot(aes(x = reorder(room_type, -log_price), 
+#              y = log_price, fill = room_type))+
+#   geom_boxplot(outlier.size = 0.5,alpha = 0.5)+
+#   ggtitle("Figure 3. Log Price for room types")+
+#   xlab("")+
+#   theme_minimal()+
+#   theme(legend.position = "none", plot.title = element_text(hjust = 0.4))
+# 
+
+ggarrange(p1,p2,
+                    labels = c("Figure3.A", "Figure3.B"),
+                    ncol = 1, nrow = 2)
+
+
+```
+             
+
+In order to test the importance statistically, we have performed pairwise Wilcoxon rank sum test and get the following result. P-values are close to zero for all pairs except Staten Island and Queens. Thus we can conclude that Borough is a significant predictor for pricing. Pairwise rank sum test also confirmed the importance of room type and cancellation policy.      
+
+```{r}
+pairwise.wilcox.test(data$price, data$neighbourhood_group)
+#pairwise.wilcox.test(data$price, data$room_type)
+#pairwise.wilcox.test(data$price, data$cancellation_policy)
+```
+
+Similar process have been done for the new variables created from amenities column. We will take "shampoo" as an example.     
+
+Firstly, as shown in Figure 4.A, log price for whether there is shampoo or not are both normally distributed. And the boxplot in Figure 4.B shows that for all five boroughs, properties providing shampoo have higher listing prices.        
+
+
+
+```{r}
+p1 <- data %>%
+  ggplot(aes(x = log_price, color = have_shampoo, fill = have_shampoo))+
+  geom_density(alpha = 0.4)+
+  theme_minimal()
+
+p2 <- data %>%
+  ggplot(aes(x = reorder(neighbourhood_group, -log_price), 
+             y = log_price, fill = have_shampoo))+
+  geom_boxplot(outlier.size = 0.5)+
+  xlab("")+
+  theme_minimal()
+
+ggarrange(p1,p2,
+                    labels = c("Figure4.A", "Figure4.B"),
+                    ncol = 1, nrow = 2)
+```
+
+Firstly, we performed F-test to see if these two groups have same variance. The result below indicates that those two groups have same variance.     
+```{r}
+have_shampoo <- data %>% filter(have_shampoo == 1) %>% pull(log_price)
+not_shampoo <- data %>% filter(have_shampoo == 0) %>% pull(log_price)
+
+var.test(have_shampoo, not_shampoo)
+```
+        
+        
+The following t test has a p-value of approximately zero, indicating a higher mean price for properties providing shampoo.    
+```{r}
+#Equal Variance
+
+t.test(have_shampoo, not_shampoo, var.equal = T,alternative = "greater")
+```
+
+        
+Furthermore, we have performed a two-way ANOVA test for shampoo and neighbourhood group. Both variables are significant with p-values less than 0.05. However, the interaction term is not significant in this case. 
+
+```{r}
+
+#### Anova to test price difference of whether have shampoo in each neighbourhood group
+
+summary(aov(log_price ~ neighbourhood_group * have_shampoo, data = data))
+```
+
+From the above results, we conclude that providing shampoo or not is an important factor for pricing. Thus, we will be including the variable "have_shampoo" in the following models. Same procedures are done for several selected amenities and we found that having shampoo, kitchen, gym and elevator are related to higher prices, while parking is not a significant factor. Interestingly, we found that properties that allow pets tends to have lower prices.      
+
+
+
+
+
+# Part 4: Predictive Modeling     
+
+## Linear Regression
+
+Since the model output, price, is a continuous variable, the first baseline model we have chosen is linear regression. We performed one-hot encoding on category variables. For example, neigbourhood_group variable, used to be a categorical variable with five levels, now expaned to five dummy variables if_Manhattan, if_Brooklym, etc.
+
+Simple linear model achieved a test MSE of 48436.03 and R-square of 0.53. We discovered multicollinearity issues as Variance inflation factor for all vairables are larger than 1, with some of them over 10 indicating serious multicollinearity issue. Hence we performed feature selection using AIC statistics and removed three variables: 
+host_identity_verified, bathrooms, have_laptop_workspac. However, we only observed a slight drop in test MSE and we decided to try regularized linear regression.
+
+```{r}
+random_list <- sample(nrow(data),round(nrow(data)*0.7))
+train <- data[random_list,]
+test <- data[-random_list,]
+```
+
+
+```{r}
+#linear regression
+data <- data %>% 
+  mutate(if_Manhattan = ifelse(data$neighbourhood_group == 'Manhattan', 1, 0)) %>%
+  mutate(if_Brooklyn = ifelse(data$neighbourhood_group == 'Brooklyn', 1, 0)) %>%
+  mutate(if_Queens = ifelse(data$neighbourhood_group == 'Queens', 1, 0)) %>%
+  mutate(if_Bronx = ifelse(data$neighbourhood_group == 'Bronx', 1, 0)) 
+
+data_linear <- data %>% 
+  mutate_at(c('host_is_superhost', 'host_identity_verified', 'instant_bookable', 'require_guest_phone_verification',
+              'transit_level', 'rule_pets', 'have_pet', 'have_shampoo', 
+              'have_gym', 'have_washer', 'have_kitchen', 'have_parking', 'have_elevator', 
+              'have_laptop_workspac'), function(x) as.numeric(x)-1)
+
+train_linear <- data_linear[random_list,]
+test_linear <- data_linear[-random_list,]
+
+fit_linear <- lm(log(price) ~ host_is_superhost + host_listings_count 
+           + host_identity_verified + latitude + longitude
+           + accommodates + bathrooms + bedrooms + beds
+           + minimum_nights + availability_365
+           + security_deposit + hosted_years + number_of_amenities
+           + number_of_verifications + transit_level + rule_pets
+           + have_pet + have_shampoo + have_gym
+           + have_washer + have_kitchen + have_parking
+           + have_elevator + have_laptop_workspac 
+           + if_Manhattan + if_Brooklyn + if_Queens + if_Bronx
+           + number_of_reviews, train_linear)
+
+#summary(fit_linear)
+#Multiple R-squared:  0.5321, Adjusted R-squared:  0.5317
+
+MSE(predict(fit_linear, test_linear), test_linear$price)
+#MSE: 48436.03
+
+#multicollinearity
+#car::vif(fit_linear)
+
+#step_result <- stepAIC(fit_linear)
+
+fit_linear1 <- lm(formula = log(price) ~ host_is_superhost + host_listings_count + 
+    latitude + longitude + accommodates + bedrooms + beds + minimum_nights + 
+    availability_365 + security_deposit + hosted_years + number_of_amenities + 
+    number_of_verifications + transit_level + rule_pets + have_pet + 
+    have_shampoo + have_gym + have_washer + have_kitchen + have_parking + 
+    have_elevator + if_Manhattan + if_Brooklyn + if_Queens + 
+    if_Bronx + number_of_reviews, data = train_linear)
+summary(fit_linear1)
+#delete host_identity_verified, bathrooms, have_laptop_workspac
+```
+
+## Regularized Linear Regression
+
+When number of features is large and suffer from collinearity issues, simple linear model tends to overfit and thus have high variance sample. Hence, we next conducted lasso regression as a means of regularization in order to perform feature selection, reduce variance and decrease our of sample error.
+
+The test MSE of lasso regression model dropped significantly from 48436.03 to 18118.49. The R-square for lasso is 0.35, which is lower than that of linear regression since linear regression suffers from overfitting.
+
+From the variable importance plot above, the top 3 variables that are determinant in pricing under Lasso model is Latitude, Bathrooms and have_gym. 
+
+```{r}
+### LASSO ###
+lasso_cv <- cv.glmnet(
+  x = data.matrix(train[,c('host_is_superhost', 'host_listings_count', 'host_identity_verified', 'latitude', 'longitude', 'accommodates', 'bathrooms', 'bedrooms', 'beds', 'minimum_nights', 'availability_365', 'security_deposit', 'hosted_years', 'number_of_amenities', 'number_of_verifications', 'transit_level', 'rule_pets', 'have_pet', 'have_shampoo', 'have_gym', 'have_washer', 'have_kitchen', 'have_parking', 'have_elevator', 'have_laptop_workspac', 'number_of_reviews')]), 
+  y = train$price,
+  alpha = 1
+)
+
+lasso_reg <- glmnet(
+  x = data.matrix(train[,c('host_is_superhost', 'host_listings_count', 'host_identity_verified', 'latitude', 'longitude', 'accommodates', 'bathrooms', 'bedrooms', 'beds', 'minimum_nights', 'availability_365', 'security_deposit', 'hosted_years', 'number_of_amenities', 'number_of_verifications', 'transit_level', 'rule_pets', 'have_pet', 'have_shampoo', 'have_gym', 'have_washer', 'have_kitchen', 'have_parking', 'have_elevator', 'have_laptop_workspac', 'number_of_reviews')]), 
+  y = train$price,
+  alpha = 1,
+  lambda=lasso_cv$lambda.min
+)
+
+pred_lasso <- predict(lasso_reg, data.matrix(test[,c('host_is_superhost', 'host_listings_count', 'host_identity_verified', 'latitude', 'longitude', 'accommodates', 'bathrooms', 'bedrooms', 'beds', 'minimum_nights', 'availability_365', 'security_deposit', 'hosted_years', 'number_of_amenities', 'number_of_verifications', 'transit_level', 'rule_pets', 'have_pet', 'have_shampoo', 'have_gym', 'have_washer', 'have_kitchen', 'have_parking', 'have_elevator', 'have_laptop_workspac', 'number_of_reviews')]), )
+
+#MSE(pred_lasso, test$price)
+#MSE: 18118.49
+
+y = test$price
+sst <- sum((y - mean(y))^2)
+sse <- sum((pred_lasso - y)^2)
+
+# R squared
+rsq <- 1 - sse / sst
+#rsq #0.3549032
+```
+
+```{r}
+a <- as.numeric(coef(lasso_reg, s = "lambda.1se"))
+aa <- data.frame(rownames(coef(lasso_reg, s = "lambda.1se")), a)
+aaa <- aa[-1,]
+colnames(aaa) <- c('row', 'value')
+ggplot(aaa, aes(value, reorder(row, value))) +
+  geom_point(show.legend = FALSE) +
+  ggtitle("Influential variables") +
+  xlab("Coefficient") +
+  ylab(NULL)
+```
+
+
+
+## Random Forest
+
+Next we train a random forest regression model since it works well with categorical variables and missing values.
+We prepared model data by splitig dataset as 70% train and 30% test and we used OOB (out-of-bag) error as validation error rate.
+
+```{r}
+model_data <- data %>%  dplyr::select(host_is_superhost,host_listings_count,
+                              host_identity_verified,
+                      neighbourhood_group, property_type, room_type, accommodates, 
+                      bathrooms, bedrooms, beds, bed_type, price, minimum_nights,
+                      availability_365, instant_bookable, cancellation_policy, 
+                      require_guest_phone_verification, host_response_time, 
+                      number_of_amenities, number_of_verifications, transit_level,
+                      rule_Pets, have_pet, have_shampoo, have_gym, have_washer,
+                      have_kitchen, have_parking, have_elevator, have_laptop_workspac)
+
+set.seed(0)
+split <- rsample::initial_split(model_data, prop = 0.7)
+data_train <- training(split)
+data_test <- testing(split)
+```
+
+Then we fitted a basic random forest model with *ranger* package. We pick number of trees to be 500 as default and  *mtry* parameters, which is number of features to pick for each split, to be $\frac{\# of features}{3}$ as default optimal number.
+
+```{r}
+rf <- ranger(
+  formula   = price ~ ., 
+  data      = data_train, 
+  num.trees = 500,
+  mtry      = floor((ncol(model_data)-1) / 3))
+```
+
+
+For this random forest model, we achieved `r rf$r.squared` OOB R squared and `r rf$prediction.error` OOB MSE. It already outperformed linear regression, but we still needed to fine tune model parameters to further improve predicting accuracy. Hence we conducted hyperparameter tuning through full grid search on three parameters:
+
+* mtry: The number of variables to randomly sample as candidates at each split. We picked a sequence evenly space around the default number 9.
+
+* nodesize: Minimum number of samples within the terminal nodes. While smaller nodesize produces deep, complex trees and will introduce more variance, large nodesize produces shallow trees and will introduce more bias. Hence we picked a sequence of 3, 5 and 7 in hope to find the optimal balance of this bias-variance tradeoff situation.
+
+* sampsize: The number of samples to train on. This is another bias-variance tradeoff situation as lower sampsize introduces bias and higher sampsize introduces variance. Hence we picked two numbers 0.632, the expected value of unique observations in the bootstrap sample, and 0.8, a reasonabally higher portion. 
+
+```{r}
+hyper_grid <- expand.grid(
+  mtry       = c(6,9,12),
+  node_size  = c(3,5,7),
+  sampe_size = c(.632, .80),
+  OOB_RMSE   = 0
+)
+```
+
+```{r,eval=False}
+# for(i in 1:nrow(hyper_grid)) {
+# 
+#   model <- ranger(
+#     formula         = price ~ .,
+#     data            = data_train,
+#     num.trees       = 500,
+#     mtry            = hyper_grid$mtry[i],
+#     min.node.size   = hyper_grid$node_size[i],
+#     sample.fraction = hyper_grid$sampe_size[i],
+#     seed            = 0
+#   )
+# 
+#   # add OOB error to grid
+#   hyper_grid$OOB_RMSE[i] <- sqrt(model$prediction.error)
+# }
+#  
+# hyper_grid %>%
+#   dplyr::arrange(OOB_RMSE) %>%
+#   head(10)
+```
+
+The grid we constructed contains `r nrow(hyper_grid)` number of parameters combinations.
+Our tuning result shows that the optimal parameters to be num.trees = 500, mtry = 9 , min.node.size = 3 and sample.fraction = 0.8. Then we went ahead feed the tuned parameters into our random forest model and performed
+visualization and prediction based on this final model.
+
+```{r}
+optimal_ranger <- ranger(
+  formula         = price ~ ., 
+  data            = data_train, 
+  num.trees       = 500,
+  mtry            = 9,
+  min.node.size   = 3,
+  sample.fraction = .8,
+  importance      = 'impurity'
+)
+```
+
+```{r}
+optimal_ranger$variable.importance %>% 
+  tidy() %>% 
+  dplyr::arrange(desc(x)) %>%
+  dplyr::top_n(15) %>%
+  ggplot(aes(reorder(names, x), x)) +
+  geom_col(fill = "lightblue") +
+  ggtitle("Top 15 important variables")+
+  xlab("")+
+  ylab("")+
+  coord_flip() +
+  theme_classic()
+```
+
+From the variable importance plot, we can see that top 3 variables that are influential to the price under random forest model is room_type, longitude and accomodates,  !!!! MAY NEED TO UPDATE !!!!!!!. They are all in line with intuition.
+
+
+```{r}
+pred <- predict(optimal_ranger, data_test)
+MSE_RF <- mean((pred$predictions - data_test$price)^2)
+MSE_RF
+```
+
+We achieved final test MSE of `r MSE_RF` by random forest model, which has a ingnificant drop from linear regression and lasso models.
+
+
+## XGBoost
+
+Then we moved on to xgboost model in hope to further improve prediction power. Whereas random forests build an ensemble of deep independent trees, XGBoosts build an ensemble of shallow and weak successive trees with each tree learning and improving on the previous. When combined, these many weak successive trees produce a powerful “committee” that are often hard to beat with other algorithms.
+
+For data preparation, we performed one-hot encoding for categorical variables using *vtreat* package since
+XGBoost only works with matrices that contain all numeric variables.
+
+```{r}
+# variable names
+features <- setdiff(names(data_train), "price")
+
+# Create the treatment plan from the training data
+treatplan <- vtreat::designTreatmentsZ(data_train, features, verbose = FALSE)
+
+# Get the "clean" variable names from the scoreFrame
+new_vars <- treatplan %>%
+  magrittr::use_series(scoreFrame) %>%        
+  dplyr::filter(code %in% c("clean", "lev")) %>% 
+  magrittr::use_series(varName)     
+
+# Prepare the training data
+features_train <- vtreat::prepare(treatplan, data_train, varRestriction = new_vars) %>% as.matrix()
+response_train <- data_train$price
+
+# Prepare the test data
+features_test <- vtreat::prepare(treatplan, data_test, varRestriction = new_vars) %>% as.matrix()
+response_test <- data_test$price
+```
+
+We started with a basic XGBoost model with 1000 rounds and 5-fold cross validation. We picked objective function to be linear because of our continous dependent variable and early_stopping_rounds to be 10, which stops training if there is no improvement for ten consecutive trees.
+
+```{r}
+set.seed(0)
+
+xgb.fit <- xgb.cv(
+  data = features_train,
+  label = response_train,
+  nrounds = 1000,
+  nfold = 5,
+  objective = "reg:linear",  # for regression models
+  verbose = 0,               # silent,
+  early_stopping_rounds = 10 # stop if no improvement for 10 consecutive trees
+)
+
+# xgb.fit$evaluation_log %>%
+#   dplyr::summarise(
+#     ntrees.train = which(train_rmse_mean == min(train_rmse_mean))[1],
+#     rmse.train   = min(train_rmse_mean),
+#     ntrees.test  = which(test_rmse_mean == min(test_rmse_mean))[1],
+#     rmse.test   = min(test_rmse_mean)
+#   )
+```
+
+```{r}
+# plot error vs number trees
+ggplot(xgb.fit$evaluation_log) +
+  geom_line(aes(iter, train_rmse_mean), color = "red") +
+  geom_line(aes(iter, test_rmse_mean), color = "blue")
+```
+
+From the plot above, we observed how training and test RMSE decreases as the number of trees grows. The training process stopped around 50 iterations when training RMSE stopped decreasing and the minumum Test RMSE we achieved is 74.93852 at around 40th iteration. 
+
+```{r, eval=False}
+## TODO ## 
+## Need to update this grid ##
+# hyper_grid <- expand.grid(
+#   eta = c(0.01, 0.05, 0.1),
+#   max_depth = c(3,5, 7), 
+#   min_child_weight = c(1, 3, 5), 
+#   subsample = c(0.65, 0.8), 
+#   colsample_bytree = c(.8, 0.9, 1), 
+#   optimal_trees = 0,               # a place to dump results
+#   min_RMSE = 0                     # a place to dump results
+# )
+# 
+# for(i in 1:nrow(hyper_grid)) {
+#   
+#   # create parameter list
+#   params <- list(
+#     eta = hyper_grid$eta[i],
+#     max_depth = hyper_grid$max_depth[i],
+#     min_child_weight = hyper_grid$min_child_weight[i],
+#     subsample = hyper_grid$subsample[i],
+#     colsample_bytree = hyper_grid$colsample_bytree[i]
+#   )
+#   
+#   set.seed(0)
+#   
+#   # train model
+#   xgb.tune <- xgb.cv(
+#     params = params,
+#     data = features_train,
+#     label = response_train,
+#     nrounds = 5000,
+#     nfold = 5,
+#     objective = "reg:linear",  # for regression models
+#     verbose = 0,               # silent,
+#     early_stopping_rounds = 10 # stop if no improvement for 10 consecutive trees
+#   )
+#   
+#   # add min training error and trees to grid
+#   hyper_grid2$optimal_trees[i] <- which.min(xgb.tune$evaluation_log$test_rmse_mean)
+#   hyper_grid2$min_RMSE[i] <- min(xgb.tune$evaluation_log$test_rmse_mean)
+# } 
+# 
+# hyper_grid %>% 
+#   dplyr::arrange(min_RMSE) %>%
+#   head(10)
+```
+
+We again tuned our xgoost model parameters through full grid search on five parameters:
+* eta: learning rate
+* max_depth: tree depth
+* min_child_weight: minimum number of observations required in each terminal node
+* subsample: percent of training data to sample for each tree
+* colsample_bytrees: percent of columns to sample from for each tree
+
+The tuning results are: eta = 0.01, max_depth = 7, min_child_weight = 1, 
+sub_sampling = 0.65, colsample_bytree = 0.9.
+
+```{r}
+## TODO## 
+tuned_params <- list(
+  eta = 0.01,
+  max_depth = 7,
+  min_child_weight = 1,
+  subsample = 0.65,
+  colsample_bytree = 0.9
+)
+
+xgb.final <- xgboost(
+  params = tuned_params,
+  data = features_train,
+  label = response_train,
+  nrounds = 5000,
+  objective = "reg:linear",  # for regression models
+  verbose = 0,               # silent,
+  early_stopping_rounds = 10 # stop if no improvement for 10 consecutive trees
+)
+
+pred <- predict(xgb.final, features_test)
+
+# results
+MSE_XGBoost <- (caret::RMSE(pred, response_test))^2
+MSE_XGBoost
+```
+
+We fed the optimal model parameters to test dataset and achieved test MSE to be 68.57523, which is slightly improved from the random forest model.
+
+```{r}
+# create importance matrix
+importance_matrix <- xgb.importance(model = xgb.final)
+
+# variable importance plot
+xgb.plot.importance(importance_matrix, top_n = 10, measure = "Gain")
+```
+
+For XGBoost model, the top 3 influential variables are accommodates, bathrooms, availability_365. 
+
+```{r}
+### TODO ###
+## Optional Include LIME visualizaiton 
+
+# # one-hot encode the local observations to be assessed.
+# local_obs_onehot <- vtreat::prepare(treatplan, local_obs, varRestriction = new_vars)
+# 
+# # apply LIME
+# explainer <- lime(data.frame(features_train), xgb.fit.final)
+# explanation <- explain(local_obs_onehot, explainer, n_features = 5)
+# plot_features(explanation)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
