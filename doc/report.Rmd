@@ -24,14 +24,20 @@ library(modelr)
 library(broom)
 library(tidyr)
 library(tidymodels)
+library(ggpubr)
 ```
 
 # Part 1: Introduction       
 
-New York City is one of the most attactive metropolitan city for tourism, thus has fostered the Airbnb market and provide huge financial benefits for individual hosts. While making it possible to earn money without establishing a real business, there are lots of problems and subtleties when setting a reasonable price. Are hosts really making money considering all aspects apart from the most obvious one - location? Is the property really worth the price or is it just because the host is good at advertising? Do you think providing shampoo will affect the price? Thus, our project will investigate the relationship between price and a range of pricing factors. We will be solving the problem from the perspective of the hosts and in particular, recommend a reasonable price or price range for recently joined ones.      
+New York City is one of the most attactive metropolitan city for tourism, thus has fostered the Airbnb market and provide huge financial benefits for individual hosts. While making it possible to earn money without establishing a real business, there are lots of problems and subtleties when setting a reasonable price. Are hosts really making money considering all aspects apart from the most obvious one - location? Is the property really worth the price or is it just because the host is good at advertising? Do you think providing shampoo will affect the price? Thus, our project will investigate the effects of a range of pricing factors. We will be solving the problem from the perspective of the hosts and in particular, help them to set reasonable prices for recently listed properties.       
 
 
-In our raw data, there are `r nrow(orig_data)` rows, each presenting a listing and `r ncol(orig_data)` columns representing possible pricing factors. Briefly browsing the columns and we have done an initial selection of factors, removing columns such as host's name, host's location and same values shared among all hosts such as state and country information which is NY, USA for all.            
+# Part 2: Objective and Data Source       
+
+The goal of our project is to investigate and model the relationship between Airbnb listing prices and a range of pricing factors. And use the models to predict and recommend reasonable prices or price ranges for recently joined hosts based on current market condition.         
+
+Our original dataset is retrieved from Inside Airbnb website (http://insideairbnb.com/get-the-data.html
+), which include current Airbnb listing details in New York area. In our raw data, there are `r nrow(orig_data)` rows, each presenting a listing and `r ncol(orig_data)` columns representing possible pricing factors. Briefly browsing the columns and we have done an initial selection of factors, removing columns such as host's name, host's location and same values shared among all hosts such as state and country information which is NY, USA for all.            
 
 
 ```{r, include=FALSE}
@@ -48,15 +54,15 @@ data <- orig_data %>% dplyr::select(id,name,description, transit, house_rules, h
 
 
 ```{r}
-nrow(data)
-ncol(data)
+#nrow(data)
+#ncol(data)
 #colnames(data)
 ```
 
 Now we are left with `r ncol(data)` columns, including numerical variables (eg: number of bedrooms/bathrooms); categorial variables(eg: neighbourhood and property types) and text variables (eg: name and description).          
 
 
-# Part 2: Data Pre-processing
+# Part 3: Data Pre-processing
 
 ```{r}
 #rename variable
@@ -132,39 +138,45 @@ data <- data[grepl("loft", data$name), property_type := "Loft"]
 ```
 
 
+In terms of data pre-processing, we have done some simple formatting such as removing dollar signs from price columns and changing characters to numeric mode. Also, we have changed all descriptive text to lower case, which is easier for extracting and analysing important words. Besides, the original data sets include over 30 property types, so we have merged similar ones such as "Apartment" and "Serviced apartment" and treat it as a factor with only 5 levels: Apartments, Hotel, Loft, House and Others.          
 
-In terms of data pre-processing, we have done some simple formatting such as removing dollar sign from price columns and change characters to numeric mode. Besides, the original data sets include over 30 property types, so we have merged similar ones such as "Apartment" and "Serviced apartment" and treat it as factor with only 5 levels: Apartments, Hotel, Loft, House and Others.       
-
-
-In order to test whether a specific amenity such as shampoo, parking or kitchen will have significant effect on pricing. We have created new dummy variables which have the names "have_shampoo" or "have_parking". Additionally, for later modelling, we have done one-hot encoding for categorical variables with more than two levels. For instance, for neighbourhood group,       
-
-
+In order to test whether a specific amenity such as shampoo, parking or kitchen will have significant effect on pricing. We have created new dummy variables which have the names "have_shampoo" or "have_parking", which could also be included in our predictive models.        
 
 
 (Also, for NLP, we have removed stopwords, punctuations and special characters from the "description" and "summary". We also have extracted their stems for further text analysis.  )              
 
 
-Looking at the histogram of price, we noticed that there are several properties with abnormally high price which will potentially impact modelling fitting and sample tests. It is natural to remove them from the dataset. Furthermore, we have removed 1 listing that has over 20 bedrooms and 5 listings with more than 20 beds. 
+
+# Part 3: Exploratory Date Analysis     
+
+After initial data cleaning, it's time to take a closer look at the distributions of the variables.     
+
+Firstly, we look at the histogram and density of the response variable - price. It can be seen from plot A below that this distribution is highly right skewed with some outliers. This type of distribution is not uncommon for many practical problems. However, it ruins the assumption of normality for many models and tests. Thus, we have also plotted the histogram for log price in plot B and the distribution is approximately normal. Hence, for the models or tests that assume normaility, it is necessary to include the log transformation on price.       
+
+
+We noticed that there are several properties with abnormally high price which will potentially impact modelling fitting and sample tests. It is natural to remove them from the dataset. Furthermore, we have removed 1 listing that has over 20 bedrooms and 5 listings with more than 20 beds. 
 ```{r}
+
 #Distribution of Price
-ggplot(aes(price), data = data) +labs(  title = "Histogram of price", xlab = "Price") + 
+pprice <- ggplot(aes(price), data = data) +labs(  title = "Histogram of price", xlab = "Price") + 
   geom_histogram(alpha=0.8, aes(y=..density..), fill="lightblue", col="white") +
    geom_density( col = "red") + 
   theme_minimal()
 
-#jpeg("rplot.jpg")
-
-ggplot(aes(log(price)), data = data) +labs(  title = "Histogram of log price", xlab = "Price") + 
+#Distribution of logPrice
+plogprice <- ggplot(aes(log(price)), data = data) +labs(  title = "Histogram of log price", xlab = "Price") + 
   geom_histogram(alpha=0.8, aes(y=..density..), fill="lightblue", col="white") +
    geom_density( col = "red") + 
   theme_minimal()
 
-#dev.off()
+ggarrange(pprice,plogprice,
+                    labels = c("A", "B"),
+                    ncol = 2, nrow = 1)
 ```
 
 
 ```{r}
-# average price by room type + boroughs
+# number of listings by room type + boroughs
 price_type <- data %>% group_by(neighbourhood_group, room_type) %>% summarise(n=n())
 setorderv(price_type, cols = "n", order = -1)
 ggplot(price_type, aes(fill=room_type, y=n, x=neighbourhood_group)) +
@@ -221,8 +233,6 @@ delete weekly_price, square_feet
 
 Next, we have to deal with missing values. It is natural to think that a property's area is highly associated with price and hence an efficient predictor. Unfortunately, in our dataset, there are over 90% of the listings that do not have that information. Therefore, we have no choice but delete the "square_feet" variable. But variables like number of bedrooms/bathrooms and room type are still variable, and are able to somewhat represent information of areas. 
 
-
-# Part 3: Exploratory Date Analysis
 
 ```{r}
 ###neighbourhood_group###
