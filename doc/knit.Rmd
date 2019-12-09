@@ -1,9 +1,14 @@
 ---
-title: "Airbnb Pricing Plan"
-author: "Group 13 - Shuang Lu, Hongye Jiang, Chengyue Meng, Siyu Yang, Shaofu Wang"
-date: "11/22/2019"
-output: pdf_document
+title: "R Notebook"
+output: pdf_notebook
+header-includes:
+    - \usepackage{setspace}\doublespacing
+fontsize: 12pt
 ---
+
+```{r}
+knitr::opts_chunk$set(echo = FALSE)
+```
 
 ```{r setup, include=FALSE}
 #load("../data/orig_data.RData")
@@ -32,7 +37,6 @@ library(ggpubr)
 # Part 1: Introduction       
 
 New York City is one of the most attactive metropolitan city for tourism, thus has fostered the Airbnb market and provide huge financial benefits for individual hosts. While making it possible to earn money without establishing a real business, there are lots of problems and subtleties when setting a reasonable price. Are hosts really making money considering all aspects apart from the most obvious one - location? Is the property really worth the price or is it just because the host is good at advertising? Do you think providing shampoo will affect the price? Thus, our project will investigate the effects of a range of pricing factors. We will be solving the problem from the perspective of the hosts and in particular, help them to set reasonable prices for recently listed properties.       
-
 
 # Part 2: Objective and Data Source       
 
@@ -228,7 +232,7 @@ ggarrange(pprice,plogprice,
 
 ```{r}
 #deal with unusual cases
-data1 <- data  %>% 
+data <- data  %>% 
   filter(price > 0,
          cleaning_fee < 200 | price > 100 | minimum_nights > 10, 
          price < 2000 | bathrooms > 1 | accommodates > 8,
@@ -245,7 +249,9 @@ data1 <- data  %>%
 #   filter(property_type != "Others") #havn't decided
 ```
 
-We have noticed that there are several properties with abnormally high price, however, after investigation we noticed that not all of these properties are outliers. Some of them truly exist. They are much more larger than normal apartments and contain more bedrooms and bathrooms. Thus, we will not treat them as outliers as they are reasonably priced. However, other properties that have fewer rooms but extremly high price are treated as outliers as they are not reasonable, and hence removed from the dataset.       
+We have noticed that there are several properties with abnormally high price, however, after investigation we noticed that not all of these properties are outliers. Some of them truly exist. They are much more larger than normal apartments and contain more bedrooms and bathrooms. Thus, we will not treat them as outliers as they are reasonably priced. However, other properties that  
+
+ Furthermore, we have removed 1 listing that has over 20 bedrooms and 5 listings with more than 20 beds.     
 
 
 Next, in order to test the importance of certain variables, we obtain the boxplot of price relative to those variables to get a general idea if the distribution are significantly different for each level. In the following part, we take the variable borough (or "neighbourhood_group") as an example. In Figure 3.A, we can see that prices are appoximately normally distributed for all five boroughs, however, the means for these distritutions differ. It is more obvious in Figure 3.B that mean prices for Manhattan and Brooklyn are higher than other three boroughs.       
@@ -358,6 +364,9 @@ From the above results, we conclude that providing shampoo or not is an importan
 
 Since the model output, price, is a continuous variable, the first baseline model we have chosen is linear regression. We performed one-hot encoding on category variables. For example, neigbourhood_group variable, used to be a categorical variable with five levels, now expaned to five dummy variables if_Manhattan, if_Brooklym, etc.
 
+Simple linear model achieved a test MSE of 48436.03 and R-square of 0.53. We discovered multicollinearity issues as Variance inflation factor for all vairables are larger than 1, with some of them over 10 indicating serious multicollinearity issue. Hence we performed feature selection using AIC statistics and removed three variables: 
+host_identity_verified, bathrooms, have_laptop_workspac. However, we only observed a slight drop in test MSE and we decided to try regularized linear regression.
+
 ```{r}
 random_list <- sample(nrow(data),round(nrow(data)*0.7))
 train <- data[random_list,]
@@ -394,16 +403,16 @@ fit_linear <- lm(log(price) ~ host_is_superhost + host_listings_count
            + if_Manhattan + if_Brooklyn + if_Queens + if_Bronx
            + number_of_reviews, train_linear)
 
-summary(fit_linear)
-#Adjusted R-squared:  0.5317
+#summary(fit_linear)
+#Multiple R-squared:  0.5321, Adjusted R-squared:  0.5317
 
 MSE(predict(fit_linear, test_linear), test_linear$price)
 #MSE: 48436.03
 
 #multicollinearity
-car::vif(fit_linear)
+#car::vif(fit_linear)
 
-step_result <- stepAIC(fit_linear)
+#step_result <- stepAIC(fit_linear)
 
 fit_linear1 <- lm(formula = log(price) ~ host_is_superhost + host_listings_count + 
     latitude + longitude + accommodates + bedrooms + beds + minimum_nights + 
@@ -412,36 +421,36 @@ fit_linear1 <- lm(formula = log(price) ~ host_is_superhost + host_listings_count
     have_shampoo + have_gym + have_washer + have_kitchen + have_parking + 
     have_elevator + if_Manhattan + if_Brooklyn + if_Queens + 
     if_Bronx + number_of_reviews, data = train_linear)
-
+summary(fit_linear1)
 #delete host_identity_verified, bathrooms, have_laptop_workspac
-
 ```
-
-Simple linear model achieved a test MSE of 48436.03 and R-square of 0.53. We discovered multicollinearity issues as Variance inflation factor for all vairables are larger than 1, with some of them over 10 indicating serious multicollinearity issue. Hence we performed feature selection using AIC statistics and removed three variables: 
-host_identity_verified, bathrooms, have_laptop_workspac. However, we only observed a slight drop in test MSE and we decided to try regularized linear regression.
 
 ## Regularized Linear Regression
 
 When number of features is large and suffer from collinearity issues, simple linear model tends to overfit and thus have high variance sample. Hence, we next conducted lasso regression as a means of regularization in order to perform feature selection, reduce variance and decrease our of sample error.
 
+The test MSE of lasso regression model dropped significantly from 48436.03 to 18118.49. The R-square for lasso is 0.35, which is lower than that of linear regression since linear regression suffers from overfitting.
+
+From the variable importance plot above, the top 3 variables that are determinant in pricing under Lasso model is Latitude, Bathrooms and have_gym. 
+
 ```{r}
 ### LASSO ###
 lasso_cv <- cv.glmnet(
-  x = data.matrix(train[,c('host_is_superhost', 'host_listings_count', 'host_identity_verified', 'latitude', 'longitude', 'accommodates', 'bathrooms', 'bedrooms', 'beds', 'minimum_nights', 'availability_365', 'security_deposit', 'hosted_years', 'number_of_amenities', 'number_of_verifications', 'transit_level', 'rule_pets', 'have_pet', 'have_shampoo', 'have_gym', 'have_washer', 'have_kitchen', 'have_parking', 'have_elevator', 'have_laptop_workspac', 'if_Manhattan', 'if_Brooklyn', 'if_Queens', 'if_Bronx', 'number_of_reviews')]), 
+  x = data.matrix(train[,c('host_is_superhost', 'host_listings_count', 'host_identity_verified', 'latitude', 'longitude', 'accommodates', 'bathrooms', 'bedrooms', 'beds', 'minimum_nights', 'availability_365', 'security_deposit', 'hosted_years', 'number_of_amenities', 'number_of_verifications', 'transit_level', 'rule_pets', 'have_pet', 'have_shampoo', 'have_gym', 'have_washer', 'have_kitchen', 'have_parking', 'have_elevator', 'have_laptop_workspac', 'number_of_reviews')]), 
   y = train$price,
   alpha = 1
 )
 
 lasso_reg <- glmnet(
-  x = data.matrix(train[,c('host_is_superhost', 'host_listings_count', 'host_identity_verified', 'latitude', 'longitude', 'accommodates', 'bathrooms', 'bedrooms', 'beds', 'minimum_nights', 'availability_365', 'security_deposit', 'hosted_years', 'number_of_amenities', 'number_of_verifications', 'transit_level', 'rule_pets', 'have_pet', 'have_shampoo', 'have_gym', 'have_washer', 'have_kitchen', 'have_parking', 'have_elevator', 'have_laptop_workspac', 'if_Manhattan', 'if_Brooklyn', 'if_Queens', 'if_Bronx', 'number_of_reviews')]), 
+  x = data.matrix(train[,c('host_is_superhost', 'host_listings_count', 'host_identity_verified', 'latitude', 'longitude', 'accommodates', 'bathrooms', 'bedrooms', 'beds', 'minimum_nights', 'availability_365', 'security_deposit', 'hosted_years', 'number_of_amenities', 'number_of_verifications', 'transit_level', 'rule_pets', 'have_pet', 'have_shampoo', 'have_gym', 'have_washer', 'have_kitchen', 'have_parking', 'have_elevator', 'have_laptop_workspac', 'number_of_reviews')]), 
   y = train$price,
   alpha = 1,
   lambda=lasso_cv$lambda.min
 )
 
-pred_lasso <- predict(lasso_reg, data.matrix(test[,c('host_is_superhost', 'host_listings_count', 'host_identity_verified', 'latitude', 'longitude', 'accommodates', 'bathrooms', 'bedrooms', 'beds', 'minimum_nights', 'availability_365', 'security_deposit', 'hosted_years', 'number_of_amenities', 'number_of_verifications', 'transit_level', 'rule_pets', 'have_pet', 'have_shampoo', 'have_gym', 'have_washer', 'have_kitchen', 'have_parking', 'have_elevator', 'have_laptop_workspac', 'if_Manhattan', 'if_Brooklyn', 'if_Queens', 'if_Bronx', 'number_of_reviews')]), )
+pred_lasso <- predict(lasso_reg, data.matrix(test[,c('host_is_superhost', 'host_listings_count', 'host_identity_verified', 'latitude', 'longitude', 'accommodates', 'bathrooms', 'bedrooms', 'beds', 'minimum_nights', 'availability_365', 'security_deposit', 'hosted_years', 'number_of_amenities', 'number_of_verifications', 'transit_level', 'rule_pets', 'have_pet', 'have_shampoo', 'have_gym', 'have_washer', 'have_kitchen', 'have_parking', 'have_elevator', 'have_laptop_workspac', 'number_of_reviews')]), )
 
-MSE(pred_lasso, test$price)
+#MSE(pred_lasso, test$price)
 #MSE: 18118.49
 
 y = test$price
@@ -450,24 +459,22 @@ sse <- sum((pred_lasso - y)^2)
 
 # R squared
 rsq <- 1 - sse / sst
-rsq #0.3549032
+#rsq #0.3549032
 ```
-
-The test MSE of lasso regression model dropped significantly from 48436.03 to 18118.49. The R-square for lasso is 0.35, which is lower than that of linear regression since linear regression suffers from overfitting.
 
 ```{r}
 a <- as.numeric(coef(lasso_reg, s = "lambda.1se"))
 aa <- data.frame(rownames(coef(lasso_reg, s = "lambda.1se")), a)
-aa <- aa[-1,]
-colnames(aa) <- c('row', 'value')
-ggplot(aa, aes(value, reorder(row, value))) +
+aaa <- aa[-1,]
+colnames(aaa) <- c('row', 'value')
+ggplot(aaa, aes(value, reorder(row, value))) +
   geom_point(show.legend = FALSE) +
-  ggtitle("Influential Variables of Lasso Regression") +
+  ggtitle("Influential variables") +
   xlab("Coefficient") +
   ylab(NULL)
 ```
 
-From the variable importance plot above, the top 3 variables that are determinant in pricing under Lasso model is Bathroom, 
+
 
 ## Random Forest
 
@@ -520,25 +527,25 @@ hyper_grid <- expand.grid(
 ```
 
 ```{r,eval=False}
-for(i in 1:nrow(hyper_grid)) {
-
-  model <- ranger(
-    formula         = price ~ .,
-    data            = data_train,
-    num.trees       = 500,
-    mtry            = hyper_grid$mtry[i],
-    min.node.size   = hyper_grid$node_size[i],
-    sample.fraction = hyper_grid$sampe_size[i],
-    seed            = 0
-  )
-
-  # add OOB error to grid
-  hyper_grid$OOB_RMSE[i] <- sqrt(model$prediction.error)
-}
- 
-hyper_grid %>%
-  dplyr::arrange(OOB_RMSE) %>%
-  head(10)
+# for(i in 1:nrow(hyper_grid)) {
+# 
+#   model <- ranger(
+#     formula         = price ~ .,
+#     data            = data_train,
+#     num.trees       = 500,
+#     mtry            = hyper_grid$mtry[i],
+#     min.node.size   = hyper_grid$node_size[i],
+#     sample.fraction = hyper_grid$sampe_size[i],
+#     seed            = 0
+#   )
+# 
+#   # add OOB error to grid
+#   hyper_grid$OOB_RMSE[i] <- sqrt(model$prediction.error)
+# }
+#  
+# hyper_grid %>%
+#   dplyr::arrange(OOB_RMSE) %>%
+#   head(10)
 ```
 
 The grid we constructed contains `r nrow(hyper_grid)` number of parameters combinations.
@@ -626,6 +633,7 @@ xgb.fit <- xgb.cv(
   verbose = 0,               # silent,
   early_stopping_rounds = 10 # stop if no improvement for 10 consecutive trees
 )
+
 # xgb.fit$evaluation_log %>%
 #   dplyr::summarise(
 #     ntrees.train = which(train_rmse_mean == min(train_rmse_mean))[1],
@@ -647,49 +655,49 @@ From the plot above, we observed how training and test RMSE decreases as the num
 ```{r, eval=False}
 ## TODO ## 
 ## Need to update this grid ##
-hyper_grid <- expand.grid(
-  eta = c(0.01, 0.05, 0.1),
-  max_depth = c(3,5, 7), 
-  min_child_weight = c(1, 3, 5), 
-  subsample = c(0.65, 0.8), 
-  colsample_bytree = c(.8, 0.9, 1), 
-  optimal_trees = 0,               # a place to dump results
-  min_RMSE = 0                     # a place to dump results
-)
-
-for(i in 1:nrow(hyper_grid)) {
-  
-  # create parameter list
-  params <- list(
-    eta = hyper_grid$eta[i],
-    max_depth = hyper_grid$max_depth[i],
-    min_child_weight = hyper_grid$min_child_weight[i],
-    subsample = hyper_grid$subsample[i],
-    colsample_bytree = hyper_grid$colsample_bytree[i]
-  )
-  
-  set.seed(0)
-  
-  # train model
-  xgb.tune <- xgb.cv(
-    params = params,
-    data = features_train,
-    label = response_train,
-    nrounds = 5000,
-    nfold = 5,
-    objective = "reg:linear",  # for regression models
-    verbose = 0,               # silent,
-    early_stopping_rounds = 10 # stop if no improvement for 10 consecutive trees
-  )
-  
-  # add min training error and trees to grid
-  hyper_grid2$optimal_trees[i] <- which.min(xgb.tune$evaluation_log$test_rmse_mean)
-  hyper_grid2$min_RMSE[i] <- min(xgb.tune$evaluation_log$test_rmse_mean)
-} 
-
-hyper_grid %>% 
-  dplyr::arrange(min_RMSE) %>%
-  head(10)
+# hyper_grid <- expand.grid(
+#   eta = c(0.01, 0.05, 0.1),
+#   max_depth = c(3,5, 7), 
+#   min_child_weight = c(1, 3, 5), 
+#   subsample = c(0.65, 0.8), 
+#   colsample_bytree = c(.8, 0.9, 1), 
+#   optimal_trees = 0,               # a place to dump results
+#   min_RMSE = 0                     # a place to dump results
+# )
+# 
+# for(i in 1:nrow(hyper_grid)) {
+#   
+#   # create parameter list
+#   params <- list(
+#     eta = hyper_grid$eta[i],
+#     max_depth = hyper_grid$max_depth[i],
+#     min_child_weight = hyper_grid$min_child_weight[i],
+#     subsample = hyper_grid$subsample[i],
+#     colsample_bytree = hyper_grid$colsample_bytree[i]
+#   )
+#   
+#   set.seed(0)
+#   
+#   # train model
+#   xgb.tune <- xgb.cv(
+#     params = params,
+#     data = features_train,
+#     label = response_train,
+#     nrounds = 5000,
+#     nfold = 5,
+#     objective = "reg:linear",  # for regression models
+#     verbose = 0,               # silent,
+#     early_stopping_rounds = 10 # stop if no improvement for 10 consecutive trees
+#   )
+#   
+#   # add min training error and trees to grid
+#   hyper_grid2$optimal_trees[i] <- which.min(xgb.tune$evaluation_log$test_rmse_mean)
+#   hyper_grid2$min_RMSE[i] <- min(xgb.tune$evaluation_log$test_rmse_mean)
+# } 
+# 
+# hyper_grid %>% 
+#   dplyr::arrange(min_RMSE) %>%
+#   head(10)
 ```
 
 We again tuned our xgoost model parameters through full grid search on five parameters:
@@ -753,6 +761,19 @@ For XGBoost model, the top 3 influential variables are accommodates, bathrooms, 
 # explanation <- explain(local_obs_onehot, explainer, n_features = 5)
 # plot_features(explanation)
 ```
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
