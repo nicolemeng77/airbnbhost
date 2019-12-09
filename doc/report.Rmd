@@ -245,9 +245,7 @@ data1 <- data  %>%
 #   filter(property_type != "Others") #havn't decided
 ```
 
-We have noticed that there are several properties with abnormally high price, however, after investigation we noticed that not all of these properties are outliers. Some of them truly exist. They are much more larger than normal apartments and contain more bedrooms and bathrooms. Thus, we will not treat them as outliers as they are reasonably priced. However, other properties that  
-
- Furthermore, we have removed 1 listing that has over 20 bedrooms and 5 listings with more than 20 beds.     
+We have noticed that there are several properties with abnormally high price, however, after investigation we noticed that not all of these properties are outliers. Some of them truly exist. They are much more larger than normal apartments and contain more bedrooms and bathrooms. Thus, we will not treat them as outliers as they are reasonably priced. However, other properties that have fewer rooms but extremly high price are treated as outliers as they are not reasonable, and hence removed from the dataset.       
 
 
 Next, in order to test the importance of certain variables, we obtain the boxplot of price relative to those variables to get a general idea if the distribution are significantly different for each level. In the following part, we take the variable borough (or "neighbourhood_group") as an example. In Figure 3.A, we can see that prices are appoximately normally distributed for all five boroughs, however, the means for these distritutions differ. It is more obvious in Figure 3.B that mean prices for Manhattan and Brooklyn are higher than other three boroughs.       
