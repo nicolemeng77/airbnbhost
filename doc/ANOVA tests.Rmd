@@ -1,0 +1,56 @@
+---
+title: "AVOVA Tests"
+output: html_document
+---
+
+```{r, message=FALSE}
+load("../data/cleaned_data.RData")
+library(tidyverse)
+```
+
+```{r}
+data <- data %>% mutate(log_price = log(price))
+
+data %>%
+  ggplot(aes(x = log_price, color = neighbourhood_group, fill = neighbourhood_group))+
+  geom_density(alpha = 0.4)+
+  theme_minimal()
+```
+
+
+```{r}
+data %>%
+  ggplot(aes(x = reorder(neighbourhood_group, -log_price), 
+             y = log_price, fill = neighbourhood_group))+
+  geom_boxplot(outlier.size = 0.5,alpha = 0.5)+
+  ggtitle("Log Price for neighbourhood groups")+
+  xlab("")+
+  theme_minimal()+
+  theme(legend.position = "none", plot.title = element_text(hjust = 0.4))
+```
+
+```{r}
+data %>%
+  ggplot(aes(x = reorder(room_type, -log_price), 
+             y = log_price, fill = room_type))+
+  geom_boxplot(outlier.size = 0.5,alpha = 0.5)+
+  ggtitle("Log Price for room types")+
+  xlab("")+
+  theme_minimal()+
+  theme(legend.position = "none", plot.title = element_text(hjust = 0.4))
+```
+
+```{r}
+data %>%
+  ggplot(aes(x = cancellation_policy, 
+             y = log_price, fill = cancellation_policy))+
+  geom_boxplot(outlier.size = 0.5,alpha = 0.5)+
+  ggtitle("Log Price for cancellation policies")+
+  xlab("")+
+  theme_minimal()+
+  theme(legend.position = "none",
+        plot.title = element_text(hjust = 0.4),
+        axis.text.x = element_text(angle = 20, vjust = 1, hjust = 1))
+```
+
+

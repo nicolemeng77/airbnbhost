@@ -1,0 +1,348 @@
+---
+title: "airbnb_GBM"
+output: html_document
+---
+
+```{r, message=FALSE}
+library(tidyverse)
+library(rsample) 
+library(gbm)
+library(xgboost)
+library(caret)
+library(lime)
+library(vtreat)
+```
+
+```{r, message=FALSE}
+load("../data/cleaned_data.RData")
+```
+
+```{r}
+View(head(data))
+```
+
+### Select features to input in the model
+```{r}
+data <- data[,-c(1:6,12,22,23,25,26,29,34)]
+```
+
+### train test split
+```{r}
+set.seed(0)
+split <- rsample::initial_split(data, prop = 0.7)
+data_train <- training(split)
+data_test <- testing(split)
+```
+
+### ############### ###
+### train GBM model ### 
+### ############### ###
+```{r}
+set.seed(0)
+
+
+gbm.fit <- gbm(
+  formula = price ~ .,
+  distribution = "gaussian",
+  data = data_train,
+  n.trees = 10000,
+  interaction.depth = 1,
+  shrinkage = 0.001,
+  cv.folds = 5,
+  n.cores = NULL, # will use all cores by default
+  verbose = FALSE
+  )  
+
+print(gbm.fit)
+```
+
+```{r}
+# get MSE and compute RMSE
+sqrt(min(gbm.fit$cv.error))
+## [1] 85.52426
+
+# plot loss function as a result of n trees added to the ensemble
+gbm.perf(gbm.fit, method = "cv")
+```
+
+### Hyperparameter tuning
+```{r}
+# create hyperparameter grid
+hyper_grid <- expand.grid(
+  shrinkage = c(.01, .1),
+  interaction.depth = c(1, 3, 5),
+  n.minobsinnode = c(5, 10),
+  bag.fraction = c(.65, 1), 
+  optimal_trees = 0,               # a place to dump results
+  min_RMSE = 0                     # a place to dump results
+)
+
+# total number of combinations
+nrow(hyper_grid)
+```
+
+```{r}
+# randomize data
+random_index <- sample(1:nrow(data_train), nrow(data_train))
+random_data_train <- data_train[random_index, ]
+
+# grid search 
+for(i in 1:nrow(hyper_grid)) {
+
+  set.seed(0)
+  
+  # train model
+  gbm.tune <- gbm(
+    formula = price ~ .,
+    distribution = "gaussian",
+    data = random_data_train,
+    n.trees = 5000,
+    interaction.depth = hyper_grid$interaction.depth[i],
+    shrinkage = hyper_grid$shrinkage[i],
+    n.minobsinnode = hyper_grid$n.minobsinnode[i],
+    bag.fraction = hyper_grid$bag.fraction[i],
+    train.fraction = .75,
+    n.cores = NULL, # will use all cores by default
+    verbose = FALSE
+  )
+  
+  # add min training error and trees to grid
+  hyper_grid$optimal_trees[i] <- which.min(gbm.tune$valid.error)
+  hyper_grid$min_RMSE[i] <- sqrt(min(gbm.tune$valid.error))
+}
+```
+
+```{r}
+hyper_grid %>% 
+  dplyr::arrange(min_RMSE) %>%
+  head(10)
+```
+Optimal parameters: shrinkage = 0.01, interaction.depth = 5, n.minobsinnode = 5, bag.fraction = 1
+
+
+### Train GBM using optimal parameters
+```{r}
+set.seed(0)
+
+gbm.fit.final <- gbm(
+  formula = price ~ .,
+  distribution = "gaussian",
+  data = data_train,
+  n.trees = 4560,
+  interaction.depth = 5,
+  shrinkage = 0.01,
+  n.minobsinnode = 5,
+  bag.fraction = 1, 
+  train.fraction = 1,
+  n.cores = NULL, # will use all cores by default
+  verbose = FALSE
+  )  
+```
+
+
+### Variable Importance plot
+```{r}
+par(mar = c(5, 8, 1, 1))
+summary(
+  gbm.fit.final, 
+  cBars = 10,
+  method = relative.influence, # also can use permutation.test.gbm
+  las = 2
+  )
+```
+
+### LIME Visualization
+
+```{r}
+model_type.gbm <- function(x, ...) {
+  return("regression")
+}
+
+predict_model.gbm <- function(x, newdata, ...) {
+  pred <- predict(x, newdata, n.trees = x$n.trees)
+  return(as.data.frame(pred))
+}
+
+# randomly pick two test case to see 
+# how do the most influential variables driving the predicted value
+local_obs <- data_test[c(2,1000), ]
+
+# apply LIME
+explainer <- lime(data_train, gbm.fit.final)
+explanation <- explain(local_obs, explainer, n_features = 5)
+plot_features(explanation)
+```
+
+### Predicting
+
+```{r}
+pred <- predict(gbm.fit.final, n.trees = gbm.fit.final$n.trees, data_test)
+
+mean((pred - data_test$price)^2)
+```
+
+
+### ############# ###
+### XGBoost model ### 
+### ############# ###
+
+### Prepare data
+
+XGBoost only works with matrices that contain all numeric variables. Hence we need to perform one-hot encoding using vtreat package
+
+```{r}
+# variable names
+features <- setdiff(names(data_train), "price")
+
+# Create the treatment plan from the training data
+treatplan <- vtreat::designTreatmentsZ(data_train, features, verbose = FALSE)
+
+# Get the "clean" variable names from the scoreFrame
+new_vars <- treatplan %>%
+  magrittr::use_series(scoreFrame) %>%        
+  dplyr::filter(code %in% c("clean", "lev")) %>% 
+  magrittr::use_series(varName)     
+
+# Prepare the training data
+features_train <- vtreat::prepare(treatplan, data_train, varRestriction = new_vars) %>% as.matrix()
+response_train <- data_train$price
+
+# Prepare the test data
+features_test <- vtreat::prepare(treatplan, data_test, varRestriction = new_vars) %>% as.matrix()
+response_test <- data_test$price
+
+# dimensions of one-hot encoded data
+dim(features_train)
+dim(features_test)
+```
+
+### Training using XGB
+
+```{r}
+set.seed(0)
+
+xgb.fit <- xgb.cv(
+  data = features_train,
+  label = response_train,
+  nrounds = 1000,
+  nfold = 5,
+  objective = "reg:linear",  # for regression models
+  verbose = 0,               # silent,
+  early_stopping_rounds = 10 # stop if no improvement for 10 consecutive trees
+)
+```
+
+```{r}
+xgb.fit$evaluation_log %>%
+  dplyr::summarise(
+    ntrees.train = which(train_rmse_mean == min(train_rmse_mean))[1],
+    rmse.train   = min(train_rmse_mean),
+    ntrees.test  = which(test_rmse_mean == min(test_rmse_mean))[1],
+    rmse.test   = min(test_rmse_mean)
+  )
+```
+
+```{r}
+# plot error vs number trees
+ggplot(xgb.fit$evaluation_log) +
+  geom_line(aes(iter, train_rmse_mean), color = "red") +
+  geom_line(aes(iter, test_rmse_mean), color = "blue")
+```
+
+### Hyperparameter tuning
+```{r}
+# create hyperparameter grid
+hyper_grid <- expand.grid(
+  eta = c(0.05, 0.1, 0.3), #0.01， 0.05，0.1
+  max_depth = c(5, 7), #3，5，7
+  min_child_weight = c(1, 3, 5), # 1，3，5
+  subsample = c(0.65, 0.8),  #c(.65, .8)
+  colsample_bytree = 1, #c(.8, 1)
+  optimal_trees = 0,               # a place to dump results
+  min_RMSE = 0                     # a place to dump results
+)
+
+nrow(hyper_grid)
+```
+
+```{r}
+hyper_grid2 <- expand.grid(
+  eta = 0.05, #0.01， 0.05，0.1
+  max_depth = 7, #3，5，7
+  min_child_weight = 1, # 1，3，5
+  subsample = c(0.65, 0.8),  #c(.65, .8)
+  colsample_bytree = c(0.8, 0.9, 1), #c(.8, 1)
+  optimal_trees = 0,               # a place to dump results
+  min_RMSE = 0                     # a place to dump results
+)
+```
+
+```{r}
+# grid search 
+for(i in 1:nrow(hyper_grid2)) {
+  
+  # create parameter list
+  params <- list(
+    eta = hyper_grid2$eta[i],
+    max_depth = hyper_grid2$max_depth[i],
+    min_child_weight = hyper_grid2$min_child_weight[i],
+    subsample = hyper_grid2$subsample[i],
+    colsample_bytree = hyper_grid2$colsample_bytree[i]
+  )
+  
+  set.seed(0)
+  
+  # train model
+  xgb.tune <- xgb.cv(
+    params = params,
+    data = features_train,
+    label = response_train,
+    nrounds = 5000,
+    nfold = 5,
+    objective = "reg:linear",  # for regression models
+    verbose = 0,               # silent,
+    early_stopping_rounds = 10 # stop if no improvement for 10 consecutive trees
+  )
+  
+  # add min training error and trees to grid
+  hyper_grid2$optimal_trees[i] <- which.min(xgb.tune$evaluation_log$test_rmse_mean)
+  hyper_grid2$min_RMSE[i] <- min(xgb.tune$evaluation_log$test_rmse_mean)
+} 
+
+```
+
+```{r}
+hyper_grid %>% 
+  dplyr::arrange(min_RMSE) %>%
+  head(10)
+```
+
+```{r}
+  tuned_params <- list(
+    eta = 0.01,
+    max_depth = 7,
+    min_child_weight = 1,
+    subsample = 0.65,
+    colsample_bytree = 0.8
+  )
+
+  xgb.final <- xgb.cv(
+    params = tuned_params,
+    data = features_train,
+    label = response_train,
+    nrounds = 1853,
+    nfold = 5,
+    objective = "reg:linear",  # for regression models
+    verbose = 0,               # silent,
+    early_stopping_rounds = 10 # stop if no improvement for 10 consecutive trees
+  )
+```
+
+```{r}
+# predict values for test data
+pred <- predict(xgb.final, features_test)
+
+# results
+caret::RMSE(pred, response_test)
+```
+
