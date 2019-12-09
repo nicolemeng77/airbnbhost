@@ -6,7 +6,7 @@ output: pdf_document
 ---
 
 ```{r setup, include=FALSE}
-#load("../data/orig_data.RData")
+load("../data/orig_data.RData")
 load("../data/cleaned_data.RData")
 library(tidyverse)
 library(MASS)

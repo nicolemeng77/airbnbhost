@@ -1,14 +1,18 @@
 ---
 title: "R Notebook"
-output: pdf_notebook
-header-includes:
-    - \usepackage{setspace}\doublespacing
+output:
+  pdf_document: default
+  pdf_notebook: default
 fontsize: 12pt
+header-includes: \usepackage{setspace}\doublespacing
 ---
 
-```{r}
+
+```{r, echo=FALSE}
 knitr::opts_chunk$set(echo = FALSE)
 ```
+
+
 
 ```{r setup, include=FALSE}
 #load("../data/orig_data.RData")
@@ -43,11 +47,12 @@ New York City is one of the most attactive metropolitan city for tourism, thus h
 The goal of our project is to investigate and model the relationship between Airbnb listing prices and a range of pricing factors. And use the models to predict and recommend reasonable prices or price ranges for recently joined hosts based on current market condition.         
 
 Our original dataset is retrieved from Inside Airbnb website (http://insideairbnb.com/get-the-data.html
-), which include current Airbnb listing details in New York area. In our raw data, there are `r nrow(orig_data)` rows, each presenting a listing and `r ncol(orig_data)` columns representing possible pricing factors. Briefly browsing the columns and we have done an initial selection of factors, removing columns such as host's name, host's location and same values shared among all hosts such as state and country information which is NY, USA for all.            
+), which include current Airbnb listing details in New York area. In our raw data, there are 48377 rows, each presenting a listing and 106 columns representing possible pricing factors. Briefly browsing the columns and we have done an initial selection of factors, removing columns such as host's name, host's location and same values shared among all hosts such as state and country information which is NY, USA for all.            
 
 
-```{r, include=FALSE}
+```{r, include=FALSE,eval=FALSE}
 #ignore useless variables
+
 data <- orig_data %>% dplyr::select(id,name,description, transit, house_rules, host_since, host_is_superhost, 
                              host_listings_count, host_identity_verified, neighbourhood_cleansed, square_feet,
                              neighbourhood_group_cleansed, zipcode, latitude, longitude, property_type, 
@@ -65,12 +70,12 @@ data <- orig_data %>% dplyr::select(id,name,description, transit, house_rules, h
 #colnames(data)
 ```
 
-Now we are left with `r ncol(data)` columns, including numerical variables (eg: number of bedrooms/bathrooms); categorial variables(eg: neighbourhood and property types) and text variables (eg: name and description).          
+Now we are left with 49 columns, including numerical variables (eg: number of bedrooms/bathrooms); categorial variables(eg: neighbourhood and property types) and text variables (eg: name and description).          
 
 
 # Part 3: Data Pre-processing
 
-```{r}
+```{r,eval=FALSE}
 #rename variable
 data <- data %>% 
   rename(neighbourhood = neighbourhood_cleansed, 
@@ -78,7 +83,7 @@ data <- data %>%
 ```
 
 
-```{r}
+```{r,eval=FALSE}
 #to lower letter, delete sign,
 data <- data %>%
   mutate(amenities = tolower(amenities)) %>% 
@@ -489,7 +494,7 @@ model_data <- data %>%  dplyr::select(host_is_superhost,host_listings_count,
                       availability_365, instant_bookable, cancellation_policy, 
                       require_guest_phone_verification, host_response_time, 
                       number_of_amenities, number_of_verifications, transit_level,
-                      rule_Pets, have_pet, have_shampoo, have_gym, have_washer,
+                      rule_pets, have_pet, have_shampoo, have_gym, have_washer,
                       have_kitchen, have_parking, have_elevator, have_laptop_workspac)
 
 set.seed(0)
@@ -526,7 +531,7 @@ hyper_grid <- expand.grid(
 )
 ```
 
-```{r,eval=False}
+```{r,eval=FALSE}
 # for(i in 1:nrow(hyper_grid)) {
 # 
 #   model <- ranger(
@@ -652,7 +657,7 @@ ggplot(xgb.fit$evaluation_log) +
 
 From the plot above, we observed how training and test RMSE decreases as the number of trees grows. The training process stopped around 50 iterations when training RMSE stopped decreasing and the minumum Test RMSE we achieved is 74.93852 at around 40th iteration. 
 
-```{r, eval=False}
+```{r, eval=FALSE}
 ## TODO ## 
 ## Need to update this grid ##
 # hyper_grid <- expand.grid(

@@ -1,0 +1,332 @@
+---
+title: "R Notebook"
+header-includes: \usepackage{setspace}\doublespacing
+output:
+  pdf_notebook: default
+  pdf_document: default
+fontsize: 12pt
+---
+
+
+```{r, echo=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+
+
+```{r setup, include=FALSE}
+#load("../data/orig_data.RData")
+load("../data/cleaned_data.RData")
+library(tidyverse)
+library(MASS)
+library(scales)
+library(data.table)
+library(rsample) 
+library(randomForest)
+library(glmnet)
+library(ranger) 
+library(gbm)
+library(xgboost)
+library(caret)
+library(lime)
+library(vtreat)
+library(modelr)
+library(broom)
+library(MLmetrics)
+library(tidyr)
+library(tidymodels)
+library(ggpubr)
+```
+
+# Part 1: Introduction       
+
+New York City is one of the most attactive metropolitan city for tourism, thus has fostered the Airbnb market and provide huge financial benefits for individual hosts. While making it possible to earn money without establishing a real business, there are lots of problems and subtleties when setting a reasonable price. Are hosts really making money considering all aspects apart from the most obvious one - location? Is the property really worth the price or is it just because the host is good at advertising? Do you think providing shampoo will affect the price? Thus, our project will investigate the effects of a range of pricing factors. We will be solving the problem from the perspective of the hosts and in particular, help them to set reasonable prices for recently listed properties.       
+
+# Part 2: Objective and Data Source       
+
+The goal of our project is to investigate and model the relationship between Airbnb listing prices and a range of pricing factors. And use the models to predict and recommend reasonable prices or price ranges for recently joined hosts based on current market condition.         
+
+Our original dataset is retrieved from Inside Airbnb website (http://insideairbnb.com/get-the-data.html
+), which include current Airbnb listing details in New York area. In our raw data, there are 48377 rows, each presenting a listing and 106 columns representing possible pricing factors. Briefly browsing the columns and we have done an initial selection of factors, removing columns such as host's name, host's location and same values shared among all hosts such as state and country information which is NY, USA for all.            
+
+
+```{r, include=FALSE,eval=FALSE}
+#ignore useless variables
+
+data <- orig_data %>% dplyr::select(id,name,description, transit, house_rules, host_since, host_is_superhost, 
+                             host_listings_count, host_identity_verified, neighbourhood_cleansed, square_feet,
+                             neighbourhood_group_cleansed, zipcode, latitude, longitude, property_type, 
+                             room_type, accommodates, bathrooms, bedrooms, beds,bed_type, amenities, price,
+                             weekly_price, cleaning_fee, minimum_nights, availability_365,
+                             number_of_reviews, instant_bookable, cancellation_policy, 
+                             require_guest_phone_verification,
+                             host_response_time, host_verifications, security_deposit)
+```
+
+
+```{r}
+#nrow(data)
+#ncol(data)
+#colnames(data)
+```
+
+Now we are left with 49 columns, including numerical variables (eg: number of bedrooms/bathrooms); categorial variables(eg: neighbourhood and property types) and text variables (eg: name and description).          
+
+
+# Part 3: Data Pre-processing
+
+```{r,eval=FALSE}
+#rename variable
+data <- data %>% 
+  rename(neighbourhood = neighbourhood_cleansed, 
+         neighbourhood_group = neighbourhood_group_cleansed) 
+```
+
+
+```{r,eval=FALSE}
+#to lower letter, delete sign,
+data <- data %>%
+  mutate(amenities = tolower(amenities)) %>% 
+  mutate(house_rules = tolower(house_rules)) %>% 
+  mutate(name = tolower(name)) 
+
+convert_price <- function(x) as.numeric(gsub("\\$|,", "", x))
+string_split <- function(x) stringr::str_split(gsub("\\{|\\}|\"", "", x),",")
+
+data <- data %>%
+  mutate_at(c("price", "weekly_price", "cleaning_fee", "security_deposit"), convert_price) %>%
+  mutate_at("amenities", string_split) %>%
+  mutate_at('host_verifications', string_split) 
+
+#add new var
+data <- data %>% 
+  mutate(hosted_years = round(as.double(difftime(Sys.Date(), host_since)) / 365, 1)) %>%
+  mutate(number_of_amenities = lengths(amenities)) %>%
+  mutate(number_of_verifications = lengths(host_verifications)) %>%
+  mutate(transit_level = as.numeric(is.na(transit))) %>%  #1:has description, 0:NA
+    #amenity
+  mutate(rule_pets = ifelse(grepl("no pets", data$house_rules), 0, 1)) %>%
+  mutate(have_pet = ifelse(grepl("cat", data$amenities) | 
+                                grepl("dog", data$amenities) | 
+                                grepl("pet", data$amenities), 1, 0)) %>%
+  mutate(have_shampoo = ifelse(grepl("shampoo", data$amenities), 1, 0)) %>%
+  mutate(have_gym = ifelse(grepl("gym", data$amenities), 1, 0)) %>%
+  mutate(have_washer = ifelse(grepl("washer", data$amenities), 1, 0)) %>%
+  mutate(have_kitchen = ifelse(grepl("kitchen", data$amenities), 1, 0)) %>%
+  mutate(have_parking = ifelse(grepl("parking", data$amenities), 1, 0)) %>% 
+  mutate(have_elevator = ifelse(grepl("elevator", data$amenities), 1, 0)) %>% 
+  mutate(have_laptop_workspac = ifelse(grepl("laptop friendly workspace", data$amenities), 1, 0))
+
+
+
+#fill NA (to 0 in most cases)
+data <- data %>%
+  mutate(host_is_superhost = ifelse(is.na(host_is_superhost), 0, host_is_superhost)) %>%
+  mutate(bathrooms = ifelse(is.na(bathrooms), 0, bathrooms)) %>%
+  mutate(bedrooms = ifelse(is.na(bedrooms), 0, bedrooms)) %>%
+  mutate(beds = ifelse(is.na(beds), 0, beds)) %>%
+  mutate(number_of_reviews = ifelse(is.na(number_of_reviews), 0, number_of_reviews)) %>%
+  mutate(host_response_time = ifelse(is.na(host_response_time), 'no_record', host_response_time)) %>%
+  mutate(cleaning_fee = ifelse(is.na(cleaning_fee), 0, cleaning_fee)) %>%
+  mutate(security_deposit = ifelse(is.na(security_deposit), 0, security_deposit)) %>%
+  mutate(host_listings_count = ifelse(is.na(host_listings_count), 0, host_listings_count)) %>%
+  mutate(host_identity_verified = ifelse(is.na(host_identity_verified), 0, host_identity_verified)) %>%
+  mutate(hosted_years = ifelse(is.na(hosted_years), 0, hosted_years)) 
+
+
+#change logical to numeric, as.factor
+data <- data %>% 
+  mutate_if(is.logical, as.numeric) %>% # convert True False to 1,0
+  mutate_at(c("neighbourhood", "neighbourhood_group", "property_type", 
+              "room_type", "bed_type", "cancellation_policy", 'host_is_superhost', 
+              'host_identity_verified', 'instant_bookable', 'require_guest_phone_verification',
+              'host_response_time', 'transit_level', 'rule_pets', 'have_pet', 'have_shampoo', 
+              'have_gym', 'have_washer', 'have_kitchen', 'have_parking', 'have_elevator', 
+              'have_laptop_workspac'), 
+            as.factor)
+
+#combine property_type ( factors)
+data <- data.table(data)
+data <- data[property_type %in% c("Barn", "Bed and breakfast", "Boat", "Bungalow","Bus","Cabin","Camper/RV","Casa particular (Cuba)", "Castle","Cave","Cottage","Dome house","Earth house","Farm stay","Houseboat","Island","Nature lodge","Other","Tent","Timeshare","Tiny house","Yurt"), property_type:= "Others"]
+data <- data[property_type %in% c("Townhouse", "House", "Guesthouse", "Resort","Villa","Tiny house"), property_type:= "House"]
+data <- data[property_type %in% c("Apartment","Condominium","Guest suite","Serviced apartment"), property_type:= "Apartment"]
+data <- data[property_type %in% c("Hostel","Hotel","Boutique hotel","Aparthotel"), property_type:= "Hotel"]
+data <- data[grepl("loft", data$name), property_type := "Loft"]
+```
+
+
+
+
+
+```{r}
+#check missing value
+#colSums(is.na(data))  #21 NAs in host_since, host_listings_count, host_identity_verified, hosted_years
+```
+
+
+In terms of data pre-processing, we have done some simple formatting such as removing dollar signs from price columns and changing characters to numeric mode. Also, we have changed all descriptive text to lower case, which is easier for extracting and analysing important words. Besides, the original data sets include over 30 property types, so we have merged similar ones such as "Apartment" and "Serviced apartment" and treat it as a factor with only 5 levels: Apartments, Hotel, Loft, House and Others.          
+
+In order to test whether a specific amenity such as shampoo, parking or kitchen will have significant effect on pricing. We have created new dummy variables which have the names "have_shampoo", "have_parking" and "have_kitchen", respectively which could also be included in our predictive models if their importance is proved.          
+
+Next, we have to deal with missing values. It is natural to think that a property's area is highly associated with price and hence an efficient predictor. Unfortunately, in our dataset, there are over 90% of the listings that do not have the area information. Therefore, we had no choice but deleted the "square_feet" variable. But variables such as numbers of bedrooms and room type are still available, and can somewhat provide similar information. 
+
+
+
+# Part 4: Exploratory Date Analysis     
+
+After initial data cleaning, it's time to take a closer look at the distributions of the variables.      
+
+Firstly, look at a general geographic distribution of the properties. As shown in the following barplot (Figure 1), over 85% of the properties are located in Manhattan and Brooklyn, among which Entire home/apartment and Private room are the most popular room type.      
+
+```{r}
+price_type <- data %>% group_by(neighbourhood_group, room_type) %>% summarise(n=n())
+setorderv(price_type, cols = "n", order = -1)
+ggplot(price_type, aes(fill=room_type, y=n, x=neighbourhood_group)) +
+        geom_bar(position="stack", stat="identity") +
+        xlab("Neighbourhood") + ylab("Counts") + labs(title = "Figure 1 Geographic Summary")
+```
+
+
+
+Next, we look at the histogram and density of the response variable - price. It can be seen from Figure 2.A below that this distribution is highly right skewed with some outliers. This type of distribution is not uncommon for many practical problems. However, it ruins the assumption of normality for many models and tests. Thus, we may want to try some kind of transformation so we have also obatined the distributino of log price in Figure 3.B and it is approximately normal. Hence, for the models or tests that assume normaility, it is necessary to include the log transformation on price.       
+
+
+```{r}
+
+#Distribution of Price
+pprice <- ggplot(aes(price), data = data) +labs(  title = "Histogram of price", xlab = "Price") + 
+  geom_histogram(alpha=0.8, aes(y=..density..), fill="lightblue", col="white") +
+   geom_density( col = "red") + 
+  theme_minimal()
+
+#Distribution of logPrice
+plogprice <- ggplot(aes(log(price)), data = data) +labs(title = "Histogram of log price", xlab = "Price") + 
+  geom_histogram(alpha=0.8, aes(y=..density..), fill="lightblue", col="white") +
+   geom_density( col = "red") + 
+  theme_minimal()
+
+ggarrange(pprice,plogprice,
+                    labels = c("2.A", "2.B"),
+                    ncol = 2, nrow = 1)
+
+```
+
+
+
+
+
+```{r}
+# number of listings by room type + boroughs
+# price_type <- data %>% group_by(neighbourhood_group, room_type) %>% summarise(n=n())
+# setorderv(price_type, cols = "n", order = -1)
+# ggplot(price_type, aes(fill=room_type, y=n, x=neighbourhood_group)) +
+#         geom_bar(position="stack", stat="identity")+
+#         xlab("Neighbourhood") + ylab("# of Listings")
+
+# Unusual cases
+
+#nrow(data)  #48377
+# show deleted numbers for each filer
+# nrow(data %>% filter(price > 2000)) #81
+# nrow(data %>% filter(price == 0 )) #10
+# nrow(data %>% filter(cleaning_fee >= 200 & price <= 100 & minimum_nights <= 10)) #37
+# nrow(data %>% filter(price >= 2000 & bathrooms <= 1 & accommodates <= 8)) #46
+# nrow(data %>% filter(minimum_nights > 90)) #361
+# nrow(data %>% filter(property_type == "Others")) #309
+```
+
+```{r}
+#deal with unusual cases
+data <- data  %>% 
+  filter(price > 0,
+         cleaning_fee < 200 | price > 100 | minimum_nights > 10, 
+         price < 2000 | bathrooms > 1 | accommodates > 8,
+         minimum_nights <= 90)
+#nrow(data1)  #47929
+
+#last version
+# data <- data  %>% 
+#   filter(beds <= 20, bedrooms <= 20,
+#          bedrooms != 1 | bathrooms <= 4, 
+#          price < 1500 & price > 0,
+#          cleaning_fee <= 200 | minimum_nights >= 30,
+#          minimum_nights <= 90) %>%
+#   filter(property_type != "Others") #havn't decided
+```
+
+We have noticed that there are several properties with abnormally high price, however, after investigation we noticed that not all of these properties are outliers. Some of them truly exist. They are much more larger than normal apartments and contain more bedrooms and bathrooms. Thus, we will not treat them as outliers as they are reasonably priced. However, other properties that  
+
+ Furthermore, we have removed 1 listing that has over 20 bedrooms and 5 listings with more than 20 beds.     
+
+
+Next, in order to test the importance of certain variables, we obtain the boxplot of price relative to those variables to get a general idea if the distribution are significantly different for each level. In the following part, we take the variable borough (or "neighbourhood_group") as an example. In Figure 3.A, we can see that prices are appoximately normally distributed for all five boroughs, however, the means for these distritutions differ. It is more obvious in Figure 3.B that mean prices for Manhattan and Brooklyn are higher than other three boroughs.       
+
+
+```{r}
+data <- data %>% mutate(log_price = log(price))
+
+p1 <- data %>%
+  ggplot(aes(x = log_price, color = neighbourhood_group, fill = neighbourhood_group))+
+  geom_density(alpha = 0.4)+
+  theme_minimal()
+
+
+p2 <- data %>%
+  ggplot(aes(x = reorder(neighbourhood_group, -log_price), 
+             y = log_price, fill = neighbourhood_group))+
+  geom_boxplot(outlier.size = 0.5,alpha = 0.5)+
+  ggtitle("Log Price for 5 boroughs")+
+  xlab("")+
+  theme_minimal()+
+  theme(legend.position = "none", plot.title = element_text(hjust = 0.4))
+
+
+# p3 <- data %>%
+#   ggplot(aes(x = reorder(room_type, -log_price), 
+#              y = log_price, fill = room_type))+
+#   geom_boxplot(outlier.size = 0.5,alpha = 0.5)+
+#   ggtitle("Figure 3. Log Price for room types")+
+#   xlab("")+
+#   theme_minimal()+
+#   theme(legend.position = "none", plot.title = element_text(hjust = 0.4))
+# 
+
+ggarrange(p1,p2,
+                    labels = c("Figure3.A", "Figure3.B"),
+                    ncol = 1, nrow = 2)
+
+
+```
+             
+
+In order to test the importance statistically, we have performed pairwise Wilcoxon rank sum test and get the following result. P-values are close to zero for all pairs except Staten Island and Queens. Thus we can conclude that Borough is a significant predictor for pricing. Pairwise rank sum test also confirmed the importance of room type and cancellation policy.      
+
+```{r}
+pairwise.wilcox.test(data$price, data$neighbourhood_group)
+#pairwise.wilcox.test(data$price, data$room_type)
+#pairwise.wilcox.test(data$price, data$cancellation_policy)
+```
+
+Similar process have been done for the new variables created from amenities column. We will take "shampoo" as an example.     
+
+Firstly, as shown in Figure 4.A, log price for whether there is shampoo or not are both normally distributed. And the boxplot in Figure 4.B shows that for all five boroughs, properties providing shampoo have higher listing prices.        
+
+
+
+```{r}
+p1 <- data %>%
+  ggplot(aes(x = log_price, color = have_shampoo, fill = have_shampoo))+
+  geom_density(alpha = 0.4)+
+  theme_minimal()
+
+p2 <- data %>%
+  ggplot(aes(x = reorder(neighbourhood_group, -log_price), 
+             y = log_price, fill = have_shampoo))+
+  geom_boxplot(outlier.size = 0.5)+
+  xlab("")+
+  theme_minimal()
+
+ggarrange(p1,p2,
+                    labels = c("Figure4.A", "Figure4.B"),
+                    ncol = 1, nrow = 2)
+```
